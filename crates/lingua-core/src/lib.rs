@@ -18,7 +18,7 @@ pub mod vocabulary;
 pub use dictionary::{DictionaryDefinition, DictionaryEntry};
 pub use error::{AppError, AppResult};
 pub use language::Language;
-pub use ocr::{OcrBlock, OcrImage, OcrLine, OcrResult};
+pub use ocr::{OcrBlock, OcrImage, OcrLine, OcrResult, base64_encode};
 pub use selection::{Rect, SelectedText, SelectionSource};
 pub use translation::{
     TextKind, TranslationMode, TranslationRequest, TranslationResult, classify_text,

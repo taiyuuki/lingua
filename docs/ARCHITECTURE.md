@@ -166,12 +166,15 @@ Capabilities（`src-tauri/capabilities/default.json`）当前只放行
    `lingua-ocr` crate（`OcrProvider` trait + Tesseract CLI 实现 +
    HTTP sidecar 实现）；`lingua-platform::capture`（macOS 走系统
    `screencapture` CLI，屏幕录制权限 FFI 预检/请求，截图即读即删）；
-   全屏透明选区 overlay（`ocr.html` 入口，拖拽框选、Esc/右键取消、
-   误点不退出）；OCR pipeline（隐藏 overlay → 截图 → OCR → 走现有
-   Router/Engine 翻译 → Popup）。
-2. **未真机人工验证**：选区 overlay 的透明度依赖
-   `macOSPrivateApi`（个人使用无碍，App Store 分发不可用）；
-   需要授予「屏幕录制」权限。
+   **快照式选区 overlay**（`ocr.html` 入口）：start 时先截主显示器
+   整屏存入内存会话，overlay 显示这张冻结截图，用户在图上框选
+   （拖拽、Esc/右键取消、误点不退出）；按「CSS 像素 = 逻辑点 ×
+   会话缩放比」换算像素坐标，`crop_image`（image crate，PNG）在
+   快照上裁剪后送 OCR。不依赖窗口透明 / macOSPrivateApi，遮罩也
+   不会被截进图。pipeline：裁剪 → OCR → 走现有 Router/Engine 翻译
+   → Popup。
+2. **未真机人工验证**；需要授予「屏幕录制」权限（权限预检 +
+   系统授权框已接）。
 3. Tesseract 中文识别需额外语言包（`brew install tesseract-lang`），
    且 Phase 5 未传 `-l` 语言参数（自动检测由翻译端处理）。
 4. PaddleOCR 以 sidecar 形式接入（`scripts/paddleocr_server.py`，

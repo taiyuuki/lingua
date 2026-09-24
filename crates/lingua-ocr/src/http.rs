@@ -16,7 +16,7 @@
 //! 响应做宽容解析：`lines` / `words` 可省略；非 200 或解析失败映射为
 //! Provider 错误。
 
-use lingua_core::{AppError, AppResult, OcrBlock, OcrImage, OcrLine, OcrResult};
+use lingua_core::{AppError, AppResult, OcrBlock, OcrImage, OcrLine, OcrResult, base64_encode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
@@ -82,7 +82,7 @@ impl crate::provider::OcrProvider for HttpOcrProvider {
 
     async fn recognize(&self, image: &OcrImage) -> AppResult<OcrResult> {
         let http = reqwest_client()?;
-        let image_base64 = use_base64::encode(&image.png);
+        let image_base64 = base64_encode(&image.png);
         let body = OcrRequestBody {
             image_base64: &image_base64,
             language_hints: &[],
@@ -165,37 +165,6 @@ fn truncate(text: &str) -> String {
     text.chars().take(200).collect()
 }
 
-/// base64 编码。Phase 5 用轻量实现避免为单个编码引入依赖；
-/// 标准库 stabilise 后切换。
-mod use_base64 {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    pub fn encode(data: &[u8]) -> String {
-        let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-        for chunk in data.chunks(3) {
-            let b = [
-                chunk[0],
-                chunk.get(1).copied().unwrap_or(0),
-                chunk.get(2).copied().unwrap_or(0),
-            ];
-            let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-            out.push(TABLE[(n >> 18) as usize & 63] as char);
-            out.push(TABLE[(n >> 12) as usize & 63] as char);
-            out.push(if chunk.len() > 1 {
-                TABLE[(n >> 6) as usize & 63] as char
-            } else {
-                '='
-            });
-            out.push(if chunk.len() > 2 {
-                TABLE[n as usize & 63] as char
-            } else {
-                '='
-            });
-        }
-        out
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -203,12 +172,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn request_body_uses_shared_base64() {
+        assert_eq!(base64_encode(b"f"), "Zg==");
+    }
+
+    #[test]
     fn base64_matches_known_vectors() {
-        assert_eq!(use_base64::encode(b""), "");
-        assert_eq!(use_base64::encode(b"f"), "Zg==");
-        assert_eq!(use_base64::encode(b"fo"), "Zm8=");
-        assert_eq!(use_base64::encode(b"foo"), "Zm9v");
-        assert_eq!(use_base64::encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
         // 二进制安全：全字节覆盖与标准实现对拍由 sidecar 集成验证。
     }
 

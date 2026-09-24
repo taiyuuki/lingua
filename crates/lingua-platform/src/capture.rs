@@ -10,6 +10,33 @@
 
 use lingua_core::{AppError, AppResult, OcrImage, Rect};
 
+/// 从整屏截图中裁剪出目标区域（像素坐标），输出新 PNG。
+/// 阻塞调用，上层用 `spawn_blocking` 包裹。
+pub fn crop_image(image: &OcrImage, rect_px: [u32; 4]) -> AppResult<OcrImage> {
+    let [x, y, width, height] = rect_px;
+    if width == 0 || height == 0 {
+        return Err(AppError::InvalidInput("crop region is empty".to_string()));
+    }
+    let decoded = ::image::load_from_memory(&image.png)
+        .map_err(|error| AppError::Ocr(format!("failed to decode capture: {error}")))?;
+    let x = x.min(decoded.width().saturating_sub(1));
+    let y = y.min(decoded.height().saturating_sub(1));
+    let cropped = decoded.crop_imm(
+        x,
+        y,
+        width.min(decoded.width() - x),
+        height.min(decoded.height() - y),
+    );
+    let mut png = Vec::new();
+    cropped
+        .write_to(
+            &mut std::io::Cursor::new(&mut png),
+            ::image::ImageFormat::Png,
+        )
+        .map_err(|error| AppError::Ocr(format!("failed to encode crop: {error}")))?;
+    OcrImage::from_png(png)
+}
+
 /// 屏幕录制权限是否已授予。
 pub fn screen_recording_granted() -> bool {
     #[cfg(target_os = "macos")]

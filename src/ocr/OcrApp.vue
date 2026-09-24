@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
-import { cancelOcr, performOcrTranslation } from "../lib/api";
+import { cancelOcr, getOcrBackground, performOcrTranslation } from "../lib/api";
 
-// 全屏透明选区 overlay：拖拽框选 → 调 perform_ocr_translation；
-// Esc 取消。坐标为 CSS 像素 = 全局逻辑点（与 screencapture -R 一致）。
+// 快照式选区：整屏截图由后端在 start_ocr_capture 时截好，
+// 这里把截图铺满窗口作为背景，用户在「冻结的屏幕」上框选。
+// 坐标为 CSS 像素 = 逻辑点，后端按会话缩放比换算成像素裁剪。
 interface Rect {
   x: number;
   y: number;
@@ -11,6 +12,7 @@ interface Rect {
   height: number;
 }
 
+const background = ref<string | null>(null);
 const dragStart = reactive({ x: 0, y: 0 });
 const rect = reactive<Rect>({ x: 0, y: 0, width: 0, height: 0 });
 const dragging = ref(false);
@@ -55,7 +57,6 @@ function onMouseUp(): void {
   if (width < 8 || height < 8) {
     return; // 误点：保持 overlay 等待重新选择
   }
-  // 后端会先隐藏本窗口再截图。
   void performOcrTranslation(x, y, width, height);
 }
 
@@ -65,11 +66,16 @@ function onKeyDown(event: KeyboardEvent): void {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener("mousedown", onMouseDown);
   window.addEventListener("mousemove", onMouseMove);
   window.addEventListener("mouseup", onMouseUp);
   window.addEventListener("keydown", onKeyDown);
+  try {
+    background.value = await getOcrBackground();
+  } catch {
+    background.value = null;
+  }
 });
 
 onUnmounted(() => {
@@ -85,6 +91,13 @@ onUnmounted(() => {
     class="ocr-overlay"
     @contextmenu.prevent="cancelOcr()"
   >
+    <img
+      v-if="background"
+      class="ocr-bg"
+      :src="background"
+      alt=""
+      draggable="false"
+    >
     <div
       v-show="dragging"
       class="ocr-rect"

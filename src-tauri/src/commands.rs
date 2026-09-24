@@ -630,7 +630,13 @@ pub async fn start_ocr_capture(app: tauri::AppHandle) -> Result<(), AppError> {
             ));
         }
     }
-    crate::ocr::show_overlay(&app).await
+    crate::ocr::start_capture(&app).await
+}
+
+/// 当前 OCR 会话的整屏截图（data URL）；overlay 挂载后拉取。
+#[tauri::command]
+pub async fn get_ocr_background(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
+    crate::ocr::current_background(&app)
 }
 
 /// 用户框选完成：坐标为全局逻辑点（overlay CSS 像素）。

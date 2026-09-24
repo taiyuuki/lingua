@@ -83,6 +83,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::vocabulary_tags,
             commands::save_to_vocabulary,
             commands::start_ocr_capture,
+            commands::get_ocr_background,
             commands::perform_ocr_translation,
             commands::cancel_ocr,
             commands::screen_recording_status,

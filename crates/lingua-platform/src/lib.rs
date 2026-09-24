@@ -13,7 +13,9 @@ pub mod unsupported;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
-pub use capture::{capture_region, request_screen_recording_access, screen_recording_granted};
+pub use capture::{
+    capture_region, crop_image, request_screen_recording_access, screen_recording_granted,
+};
 pub use os::{Os, current_os};
 pub use selection::SelectionProvider;
 pub use selection_service::SelectionService;

@@ -549,17 +549,26 @@ textarea {
 .ocr-overlay {
   width: 100vw;
   height: 100vh;
-  background: rgba(15, 17, 22, 0.22);
+  background: #101216;
   cursor: crosshair;
   overflow: hidden;
   user-select: none;
 }
 
+/* 快照背景：start_ocr_capture 截好的整屏图，所见即所选 */
+.ocr-bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: fill;
+  pointer-events: none;
+}
+
 .ocr-rect {
   position: fixed;
   border: 1.5px solid var(--color-accent);
-  background: rgba(79, 110, 247, 0.08);
-  box-shadow: 0 0 0 9999px rgba(15, 17, 22, 0.35);
+  box-shadow: 0 0 0 9999px rgba(10, 11, 14, 0.45);
   pointer-events: none;
 }
 

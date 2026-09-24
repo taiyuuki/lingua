@@ -2544,6 +2544,7 @@ dependencies = [
  "arboard",
  "async-trait",
  "core-foundation 0.10.1",
+ "image",
  "lingua-core",
  "serde",
  "tokio",

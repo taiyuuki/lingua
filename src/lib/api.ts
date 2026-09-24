@@ -188,6 +188,10 @@ export async function startOcrCapture(): Promise<void> {
   await invoke("start_ocr_capture");
 }
 
+export async function getOcrBackground(): Promise<string | null> {
+  return invoke<string | null>("get_ocr_background");
+}
+
 export async function performOcrTranslation(
   x: number,
   y: number,
