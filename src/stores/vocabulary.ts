@@ -67,9 +67,7 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
   }
 
   async function remove(id: number): Promise<void> {
-    if (!window.confirm("确定从生词本删除该词条？")) {
-      return;
-    }
+    // 确认交互在组件层（两段点击）；WKWebView 不支持 window.confirm。
     try {
       await deleteVocabulary(id);
       await load();

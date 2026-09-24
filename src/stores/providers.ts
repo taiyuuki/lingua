@@ -115,9 +115,7 @@ export const useProvidersStore = defineStore("providers", () => {
   }
 
   async function remove(id: string): Promise<void> {
-    if (!window.confirm(`确定删除 Provider「${id}」？其 API Key 也会一并清除。`)) {
-      return;
-    }
+    // 确认交互在组件层（两段点击）；WKWebView 不支持 window.confirm。
     try {
       await deleteProvider(id);
       delete testResults[id];

@@ -90,9 +90,7 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
   }
 
   async function remove(id: string): Promise<void> {
-    if (!window.confirm(`确定删除词典「${id}」？全部词条数据将被移除。`)) {
-      return;
-    }
+    // 确认交互在组件层（两段点击）；WKWebView 不支持 window.confirm。
     try {
       await deleteDictionary(id);
       await load();

@@ -1,11 +1,28 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { TSV_FORMAT_HINT, useDictionariesStore } from "../stores/dictionaries";
 
 const store = useDictionariesStore();
 const { dictionaries, loadError, importError, importMessage, importing, form, languageOptions } =
   storeToRefs(store);
+
+// 两段确认删除（WKWebView 不支持 window.confirm）
+const confirmingId = ref<string | null>(null);
+
+function requestRemove(id: string): void {
+  if (confirmingId.value === id) {
+    confirmingId.value = null;
+    void store.remove(id);
+    return;
+  }
+  confirmingId.value = id;
+  window.setTimeout(() => {
+    if (confirmingId.value === id) {
+      confirmingId.value = null;
+    }
+  }, 3000);
+}
 
 onMounted(() => {
   void store.load();
@@ -57,11 +74,12 @@ onMounted(() => {
         </div>
         <div class="provider-actions">
           <button
-            class="btn btn-small btn-danger"
+            class="btn btn-small"
+            :class="confirmingId === dictionary.id ? 'btn-danger-solid' : 'btn-danger'"
             type="button"
-            @click="store.remove(dictionary.id)"
+            @click="requestRemove(dictionary.id)"
           >
-            删除
+            {{ confirmingId === dictionary.id ? "确认删除" : "删除" }}
           </button>
         </div>
       </li>

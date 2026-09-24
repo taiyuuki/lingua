@@ -250,6 +250,16 @@ body {
   background: var(--color-danger-bg);
 }
 
+.btn-danger-solid {
+  background: var(--color-danger);
+  border-color: transparent;
+  color: #fff;
+}
+
+.btn-danger-solid:hover {
+  background: color-mix(in srgb, var(--color-danger) 85%, black);
+}
+
 .card-header-row {
   display: flex;
   align-items: center;

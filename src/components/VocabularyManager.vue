@@ -11,6 +11,7 @@ const store = useVocabularyStore();
 const { items, tags, loadError, editError, filter } = storeToRefs(store);
 
 const editingId = ref<number | null>(null);
+const confirmingId = ref<number | null>(null);
 const editForm = reactive({ notes: "", tags: "", mastery: "new" as Mastery });
 
 function masteryLabel(mastery: Mastery): string {
@@ -22,6 +23,7 @@ function applyFilters(): void {
 }
 
 function startEdit(item: VocabularyItemDto): void {
+  confirmingId.value = null;
   editingId.value = item.id;
   editForm.notes = item.notes;
   editForm.tags = item.tags.join(", ");
@@ -33,6 +35,24 @@ async function submitEdit(id: number): Promise<void> {
   if (!editError.value) {
     editingId.value = null;
   }
+}
+
+/**
+ * 两段确认删除（Tauri WKWebView 里 window.confirm 不弹窗且恒返回 false，
+ * 不能用原生确认框）：第一次点击进入待确认态，3 秒内再点才真删。
+ */
+function requestRemove(id: number): void {
+  if (confirmingId.value === id) {
+    confirmingId.value = null;
+    void store.remove(id);
+    return;
+  }
+  confirmingId.value = id;
+  window.setTimeout(() => {
+    if (confirmingId.value === id) {
+      confirmingId.value = null;
+    }
+  }, 3000);
 }
 
 onMounted(() => {
@@ -47,8 +67,8 @@ onMounted(() => {
       <span class="muted count-hint">{{ items.length }} 条</span>
     </div>
     <p class="muted">
-      划词翻译单词时自动记录（含查询次数）；短语/句子可在 Popup
-      里手动收藏。词典回答「是什么意思」，生词本记录「对你意味着什么」。
+      划词翻译单词时自动记录（含查询次数）；Popup 里的 ★ 只针对生词，
+      可随时移除。词典回答「是什么意思」，生词本记录「对你意味着什么」。
     </p>
     <p
       v-if="loadError"
@@ -108,20 +128,21 @@ onMounted(() => {
       </label>
     </div>
 
-    <!-- 列表 -->
-    <ul
+    <!-- 词条卡片列表 -->
+    <div
       v-if="items.length > 0"
-      class="provider-list"
+      class="vocab-list"
     >
-      <li
+      <article
         v-for="item in items"
         :key="item.id"
-        class="provider-row vocab-row"
+        class="vocab-item"
       >
+        <!-- 浏览态 -->
         <template v-if="editingId !== item.id">
-          <div class="provider-info">
+          <div class="vocab-item-head">
             <div class="provider-title">
-              <strong>{{ item.word }}</strong>
+              <strong class="vocab-word">{{ item.word }}</strong>
               <span
                 class="chip"
                 :class="`mastery-${item.mastery}`"
@@ -132,39 +153,47 @@ onMounted(() => {
                 class="chip"
               >{{ tag }}</span>
             </div>
-            <p
-              v-if="item.translation"
-              class="provider-detail"
-            >
-              {{ item.translation }}
-            </p>
-            <p class="provider-detail">
-              查询 {{ item.lookupCount }} 次 · 复习 {{ item.reviewCount }} 次 ·
-              最近 {{ item.lastSeenAt.slice(0, 10) }} · 来源 {{ item.source }}
-            </p>
-            <p
-              v-if="item.notes"
-              class="provider-detail"
-            >
-              📝 {{ item.notes }}
-            </p>
+            <div class="provider-actions">
+              <button
+                class="btn btn-small btn-secondary"
+                type="button"
+                @click="startEdit(item)"
+              >
+                编辑
+              </button>
+              <button
+                class="btn btn-small"
+                :class="confirmingId === item.id ? 'btn-danger-solid' : 'btn-danger'"
+                type="button"
+                @click="requestRemove(item.id)"
+              >
+                {{ confirmingId === item.id ? "确认删除" : "删除" }}
+              </button>
+            </div>
           </div>
-          <div class="provider-actions">
-            <button
-              class="btn btn-small btn-secondary"
-              type="button"
-              @click="startEdit(item)"
-            >
-              编辑
-            </button>
-            <button
-              class="btn btn-small btn-danger"
-              type="button"
-              @click="store.remove(item.id)"
-            >
-              删除
-            </button>
-          </div>
+
+          <p
+            v-if="item.translation"
+            class="vocab-translation"
+          >
+            {{ item.translation }}
+          </p>
+          <p
+            v-if="item.notes"
+            class="vocab-notes"
+          >
+            {{ item.notes }}
+          </p>
+          <p
+            v-if="item.examples.length > 0"
+            class="vocab-examples"
+          >
+            {{ item.examples.join(" / ") }}
+          </p>
+          <p class="vocab-meta">
+            查询 {{ item.lookupCount }} · 复习 {{ item.reviewCount }} ·
+            {{ item.lastSeenAt.slice(0, 10) }} · {{ item.source }}
+          </p>
         </template>
 
         <!-- 编辑态 -->
@@ -209,7 +238,7 @@ onMounted(() => {
           </div>
           <p
             v-if="item.examples.length > 0"
-            class="provider-detail"
+            class="vocab-examples"
           >
             例句：{{ item.examples.join(" / ") }}
           </p>
@@ -235,8 +264,8 @@ onMounted(() => {
             {{ editError }}
           </p>
         </form>
-      </li>
-    </ul>
+      </article>
+    </div>
     <p
       v-else-if="!loadError"
       class="muted"
