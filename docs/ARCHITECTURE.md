@@ -233,6 +233,7 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
 
 （定位：Vision LLM 不替代普通 OCR，只做高级 fallback —— 需求原话。）
 
-后续候选（按需排）：Phase 9 学习分析、词典导入文件选择器
-（`tauri-plugin-dialog`）、Windows 打包（nsis/msi + 图标）、
-托盘与自启（Phase 10）、SRS 复习（Phase 9）。
+后续候选（按需排）：Phase 9 学习分析、托盘与自启（Phase 10）、
+SRS 复习（Phase 9）、ocr_history（Phase 8）。
+（图标与文件选择器、Windows 打包 nsis/msi 已完成：
+`pnpm tauri build` 产出 `target/release/bundle/` 下两种安装包。）
