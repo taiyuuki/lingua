@@ -4,6 +4,7 @@ import { storeToRefs } from "pinia";
 import { useAppStore } from "./stores/app";
 import { useSettingsStore } from "./stores/settings";
 import ProviderManager from "./components/ProviderManager.vue";
+import DictionaryManager from "./components/DictionaryManager.vue";
 import RouterSettings from "./components/RouterSettings.vue";
 
 const appStore = useAppStore();
@@ -62,6 +63,7 @@ onMounted(() => {
     </section>
 
     <ProviderManager />
+    <DictionaryManager />
     <RouterSettings />
 
     <section class="card">

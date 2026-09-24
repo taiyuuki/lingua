@@ -15,7 +15,7 @@ use std::sync::Mutex;
 )]
 pub enum PopupState {
     Loading,
-    Result(TranslationResult),
+    Result(Box<TranslationResult>),
     Error { kind: String, message: String },
 }
 

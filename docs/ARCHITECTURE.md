@@ -31,8 +31,9 @@ OS / Network / SQLite / Models
 | `lingua-core` | 领域模型：`AppError`（含 `NoSelection`）、`Language`、`SelectedText`、`TranslationRequest/Result`，IPC 序列化契约（camelCase） | ✅ Phase 0/1 |
 | `lingua-platform` | `SelectionProvider` trait + `SelectionService` fallback 编排；macOS 实现（AX 读选区 + Cmd+C 剪贴板 fallback + 光标定位）；Windows/Linux 为明确的 unsupported 占位 | ✅ macOS Phase 1 |
 | `lingua-ai` | `AIProvider` trait、`OpenAiCompatibleProvider`（reqwest/rustls）、`AIRouter`（AiTask → Provider 路由 + 默认回退）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1/2 |
-| `lingua-translation` | Translation Engine + `prompts/translate/` 模板（`{{占位符}}` 渲染，编译期内嵌）；结构化 JSON 解析失败时优雅降级为纯文本 | ✅ Phase 1 |
-| `lingua-database` | SQLite（rusqlite bundled）、migration runner、settings KV、providers 表 DAO | ✅ Phase 0/1 |
+| `lingua-translation` | Translation Engine：单词 → 词典优先（释义语言须匹配目标语言），未命中/短语/句子 → AI；`prompts/translate/` 模板内嵌；AI JSON 解析失败优雅降级 | ✅ Phase 1/3 |
+| `lingua-dictionary` | `DictionaryProvider` trait、SQLite 词典实现、TSV 导入器（CC-CEDICT 等公开词典可先转 TSV 再导入） | ✅ Phase 3 |
+| `lingua-database` | SQLite（rusqlite bundled）、migration runner、settings KV、providers / dictionaries 表 DAO | ✅ Phase 0/1/3 |
 | `lingua-secrets` | `SecretStore` trait + keyring 实现（macOS Keychain / Windows Credential Manager / Linux Secret Service）；API Key 明文只存在这里 | ✅ Phase 1 |
 | `lingua` (src-tauri) | Tauri 壳：commands、全局快捷键、翻译 pipeline（经 Router）、Popup、Provider 管理/连接测试/应用设置命令 | ✅ Phase 1/2 |
 
@@ -131,14 +132,28 @@ Capabilities（`src-tauri/capabilities/default.json`）当前只放行
 4. 路由粒度目前只有 Translate 一个任务；Vision（Phase 6）/学习分析（Phase 9）
    接入时在 `AiTask` 枚举上扩展即可。
 
-## 8. Phase 3 待办（下一步）
+## 8. Phase 3 已知限制
 
-按原规划进入 **Dictionary（词典）**：
+1. 词典已完成：三表 schema（dictionaries / dictionary_entries /
+   dictionary_definitions，migration 0003）、`DictionaryProvider` trait +
+   SQLite 实现、TSV 导入器（行级容错、同 lemma 合并、单事务增量导入）、
+   Popup 词典视图（音标 / 词性 / 释义 / 例句）。
+2. 导入用「文件路径输入」而非文件选择器（需要 `tauri-plugin-dialog`，
+   随打包阶段一起引入）；CC-CEDICT / JMdict 原生解析器未做，
+   现阶段用脚本转 TSV（格式见导入表单提示）。
+3. 词典路由只对「单词」生效（`classify_text` 启发式：CJK ≤4 字、
+   其它 ≤1 词）；生词/词组的词典短路是后续优化。
+4. 释义语言必须等于目标语言才采用词典结果，跨多目标语言需导入
+   对应方向的词典。
 
-1. `lingua-database` 新增 migration：`dictionaries` / `dictionary_entries` /
-   `dictionary_definitions` 表（统一 `DictionaryEntry` 模型）。
-2. `DictionaryProvider` trait（`lookup(word, language)`），DB 词典为首个实现。
-3. Translation Engine 路由策略升级：单词/短语 → 词典优先 + AI 补充；
-   句子 → AI。
-4. 可导入公开词典数据（CC-CEDICT / JMdict / ECDICT 等，格式转换器按需实现）。
-5. Popup 词典视图：释义、音标、词性、例句。
+## 9. Phase 4 待办（下一步）
+
+按原规划进入 **Vocabulary（生词本）**。生词本与词典分离：
+词典回答「这个词是什么意思」，生词本回答「这个词对你意味着什么」。
+
+1. migration 0004：`vocabulary`（word, language, created_at, last_seen_at,
+   lookup_count, mastery, notes, tags, source）、`vocabulary_reviews` 表。
+2. vocabulary DAO + application service（收藏 / 标记掌握 / 笔记 / 标签）。
+3. 与划词链路打通：翻译单词时自动 `upsert` 生词记录 + `lookup_count` 自增。
+4. 生词本 UI（列表、筛选、编辑笔记/标签/掌握程度）；SRS 只留数据字段，
+   算法后续阶段实现。

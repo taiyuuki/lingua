@@ -1,11 +1,64 @@
 //! 翻译请求/结果的数据契约。
 //!
 //! 这里只定义「Translation Engine 的输入输出」；引擎本身（路由到
-//! Dictionary / Translation Provider / AI）在后续阶段实现，
-//! 属于 application/domain service 层。
+//! Dictionary / Translation Provider / AI）在 crate `lingua-translation`
+//! 中实现。
 
+use crate::dictionary::DictionaryEntry;
 use crate::language::Language;
 use serde::{Deserialize, Serialize};
+
+/// 文本形态分类，用于引擎路由决策（词典只对单词生效）。
+///
+/// 这是启发式分类，不追求语言学精确：CJK 按字符数、其它按空格分词。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextKind {
+    Word,
+    Phrase,
+    Sentence,
+}
+
+/// 判断文本是否是 CJK 表意字符。
+fn is_cjk(c: char) -> bool {
+    matches!(c, '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}' | '\u{F900}'..='\u{FAFF}')
+}
+
+/// 粗略分类一段待翻译文本。
+pub fn classify_text(text: &str) -> TextKind {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return TextKind::Word;
+    }
+
+    let has_terminal_punctuation = trimmed.chars().any(|c| {
+        matches!(
+            c,
+            '.' | '!' | '?' | ';' | ':' | '。' | '！' | '？' | '；' | '：' | '…'
+        )
+    });
+    if has_terminal_punctuation {
+        return TextKind::Sentence;
+    }
+
+    let cjk_chars = trimmed.chars().filter(|c| is_cjk(*c)).count();
+    let space_tokens = trimmed.split_whitespace().count();
+    if cjk_chars > 0 && space_tokens > 1 {
+        // 中英混排或多段 CJK：按短语处理。
+        return TextKind::Phrase;
+    }
+    if cjk_chars > 0 {
+        return if cjk_chars <= 4 {
+            TextKind::Word
+        } else {
+            TextKind::Phrase
+        };
+    }
+    if space_tokens <= 1 {
+        TextKind::Word
+    } else {
+        TextKind::Phrase
+    }
+}
 
 /// 翻译风格模式，会透传给 Prompt 与路由决策。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -52,6 +105,9 @@ pub struct TranslationResult {
     pub detected_language: Option<Language>,
     pub alternatives: Vec<String>,
     pub explanation: Option<String>,
+    /// 命中词典时携带完整词条，Popup 据此渲染词典视图。
+    #[serde(default)]
+    pub dictionary: Option<DictionaryEntry>,
 }
 
 #[cfg(test)]
@@ -91,9 +147,23 @@ mod tests {
             detected_language: Some(Language::En),
             alternatives: vec!["您好".into()],
             explanation: None,
+            dictionary: None,
         };
         let json = serde_json::to_value(&result).unwrap();
         assert!(json.get("translatedText").is_some());
         assert!(json.get("detectedLanguage").is_some());
+    }
+
+    #[test]
+    fn classify_recognizes_words_phrases_and_sentences() {
+        assert_eq!(classify_text("ephemeral"), TextKind::Word);
+        assert_eq!(classify_text("  ephemeral "), TextKind::Word);
+        assert_eq!(classify_text("an ephemeral moment"), TextKind::Phrase);
+        assert_eq!(classify_text("It is ephemeral."), TextKind::Sentence);
+        assert_eq!(classify_text("你好"), TextKind::Word);
+        assert_eq!(classify_text("人工智能"), TextKind::Word);
+        assert_eq!(classify_text("今天天气真不错啊"), TextKind::Phrase);
+        assert_eq!(classify_text("今天天气真不错。"), TextKind::Sentence);
+        assert_eq!(classify_text("machine 学习"), TextKind::Phrase);
     }
 }

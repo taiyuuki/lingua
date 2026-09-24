@@ -7,12 +7,16 @@
 //! 序列化约定：所有会跨越 IPC 边界的类型一律 `camelCase`，
 //! 与前端 TypeScript 类型保持一致。
 
+pub mod dictionary;
 pub mod error;
 pub mod language;
 pub mod selection;
 pub mod translation;
 
+pub use dictionary::{DictionaryDefinition, DictionaryEntry};
 pub use error::{AppError, AppResult};
 pub use language::Language;
 pub use selection::{Rect, SelectedText, SelectionSource};
-pub use translation::{TranslationMode, TranslationRequest, TranslationResult};
+pub use translation::{
+    TextKind, TranslationMode, TranslationRequest, TranslationResult, classify_text,
+};

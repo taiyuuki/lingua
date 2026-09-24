@@ -411,6 +411,38 @@ body {
   user-select: text;
 }
 
+.popup-dictionary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chip-source {
+  margin-left: auto;
+}
+
+.popup-dict-definitions {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  user-select: text;
+}
+
+.popup-dict-text {
+  margin-left: 4px;
+}
+
+.popup-dict-examples {
+  margin: 2px 0 0;
+  padding: 0 0 0 14px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-style: italic;
+}
+
 .popup-actions {
   flex-shrink: 0;
   display: flex;

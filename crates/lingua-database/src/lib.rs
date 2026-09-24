@@ -7,10 +7,12 @@
 //! * UI 不直接触达本 crate —— 只有 application service 层可以调用。
 //! * 业务数据不允许散落在 JSON 文件里；settings 表是唯一的 KV 例外。
 
+pub mod dictionaries;
 pub mod migrations;
 pub mod providers;
 pub mod settings;
 
+pub use dictionaries::{DictionaryInfo, DictionaryMeta};
 pub use migrations::{MIGRATIONS, Migration, latest_version};
 
 use lingua_core::{AppError, AppResult};

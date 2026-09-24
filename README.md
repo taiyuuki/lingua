@@ -4,7 +4,8 @@
 
 技术栈：**Tauri 2 + Vue 3 + TypeScript + Rust workspace + SQLite**。
 
-> 当前状态：**Phase 2 —— 多 Provider + AI Router 已完成**（Phase 1 划词翻译链路之上）。
+> 当前状态：**Phase 3 —— 本地词典已完成**（划词翻译 + 多 Provider 路由之上）：
+> 单词翻译词典优先，命中直接出结果（快、离线、零成本）。
 > 在任意应用选中文字 → 全局快捷键 → Popup 显示 AI 翻译。
 > 架构决策与阶段规划见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -16,7 +17,8 @@ lingua/
 │   ├── lingua-core/         # 领域模型：AppError / Language / SelectedText / Translation*
 │   ├── lingua-platform/     # 平台抽象：SelectionProvider、macOS AX/剪贴板实现、光标定位
 │   ├── lingua-ai/           # AI 抽象：AIProvider trait、OpenAI-compatible 实现、AIRouter 任务路由
-│   ├── lingua-translation/  # Translation Engine + prompts/ 模板（编译期内嵌）
+│   ├── lingua-translation/  # Translation Engine：词典优先路由 + prompts/ 模板
+│   ├── lingua-dictionary/   # DictionaryProvider trait、SQLite 词典、TSV 导入器
 │   ├── lingua-database/     # SQLite：migration runner、settings、providers 表
 │   └── lingua-secrets/      # OS 密钥库（Keychain / Credential Manager / Secret Service）
 ├── src-tauri/               # Tauri 应用壳：commands、全局快捷键、翻译 pipeline、Popup
@@ -36,6 +38,8 @@ lingua/
    在「路由与快捷键」里选默认 Provider / 翻译任务 Provider / 目标语言。
 2. 在任意应用中选中文本，按 `alt+t`（可在设置里改）。
 3. 翻译结果在光标附近的 Popup 中显示；`Esc` 或点击外部关闭。
+4. （可选）在「词典」卡片导入 TSV 词典：翻译单词时优先命中本地词典，
+   Popup 显示词性、释义、例句。格式说明见导入表单内的提示。
 4. macOS 首次使用需在「系统设置 → 隐私与安全性 → 辅助功能」授权本应用。
 
 ## 环境要求
@@ -57,7 +61,7 @@ pnpm lint               # ESLint
 pnpm test               # vitest 前端测试
 
 cargo check --workspace --all-targets   # Rust 快速检查
-cargo test --workspace                  # Rust 测试（58 个）
+cargo test --workspace                  # Rust 测试（74 个）
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
@@ -73,14 +77,14 @@ RUST_LOG=lingua=debug pnpm tauri dev
 
 约束：API Key、用户划词文本、截图内容不写日志（划词只记录字符数）。
 
-## 验收状态（Phase 2）
+## 验收状态（Phase 3）
 
 | 检查项 | 命令 | 状态 |
 |--------|------|------|
 | 前端安装 | `pnpm install` | ✅ |
 | 前端构建 | `pnpm build` | ✅（main + popup 双入口） |
 | Rust 检查 | `cargo check --workspace --all-targets` | ✅ |
-| Rust 测试 | `cargo test --workspace` | ✅ 58 passed |
+| Rust 测试 | `cargo test --workspace` | ✅ 74 passed |
 | Lint | `cargo clippy -D warnings` / `pnpm lint` | ✅ |
 | 应用链接 | `cargo build --workspace` | ✅ |
 | 划词→翻译→Popup 全链路 | `pnpm tauri dev` 手动验证 | ⚠️ 需真机人工验证 |

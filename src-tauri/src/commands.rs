@@ -13,6 +13,8 @@ use crate::{
 use lingua_ai::{AIProvider, ProviderKind};
 use lingua_core::{AppError, AppResult, Language};
 use lingua_database::providers::ProviderRecord;
+use lingua_database::{DictionaryInfo, DictionaryMeta};
+use lingua_dictionary::parse_tsv;
 use lingua_secrets::{KeyringSecretStore, SecretRef, SecretStore};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -385,4 +387,99 @@ pub async fn latest_popup_state(app: tauri::AppHandle) -> Result<Option<PopupSta
 #[tauri::command]
 pub async fn selection_permission_status() -> Result<bool, AppError> {
     Ok(lingua_platform::selection_permission_granted())
+}
+
+// ---------- 词典管理（Phase 3） ----------
+
+#[tauri::command]
+pub async fn list_dictionaries(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<DictionaryInfo>, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.list_dictionaries())
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportDictionaryRequest {
+    pub id: String,
+    pub name: String,
+    pub source_language: Language,
+    pub gloss_language: Language,
+    /// 词典 TSV 文件的绝对路径（Phase 3 用路径输入，文件选择器后续接入）。
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportDictionaryResult {
+    pub imported_entries: usize,
+    pub skipped_lines: usize,
+}
+
+/// 从 TSV 文件导入词典（格式见 `lingua_dictionary::tsv` 模块文档）。
+#[tauri::command]
+pub async fn import_dictionary_tsv(
+    state: tauri::State<'_, AppState>,
+    request: ImportDictionaryRequest,
+) -> Result<ImportDictionaryResult, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = request.id.trim().to_string();
+        if id.is_empty() {
+            return Err(AppError::InvalidInput(
+                "dictionary id is required".to_string(),
+            ));
+        }
+        let text = std::fs::read_to_string(&request.path).map_err(|error| {
+            AppError::InvalidInput(format!("cannot read `{}`: {error}", request.path))
+        })?;
+        let parsed = parse_tsv(
+            &text,
+            request.source_language.clone(),
+            request.gloss_language.clone(),
+            &id,
+        );
+        if parsed.entries.is_empty() {
+            return Err(AppError::InvalidInput(format!(
+                "no valid entries found in `{}`; check the TSV format",
+                request.path
+            )));
+        }
+        let meta = DictionaryMeta {
+            id,
+            name: request.name.trim().to_string(),
+            source_language: request.source_language,
+            gloss_language: request.gloss_language,
+        };
+        let imported_entries = database.import_dictionary(&meta, &parsed.entries)?;
+        tracing::info!(
+            dictionary = %meta.id,
+            imported = imported_entries,
+            skipped = parsed.skipped_lines,
+            "dictionary imported"
+        );
+        Ok(ImportDictionaryResult {
+            imported_entries,
+            skipped_lines: parsed.skipped_lines,
+        })
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+#[tauri::command]
+pub async fn delete_dictionary(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database.delete_dictionary(&id)?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
 }

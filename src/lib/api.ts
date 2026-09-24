@@ -32,6 +32,7 @@ export interface TranslationResult {
   detectedLanguage: string | null;
   alternatives: string[];
   explanation: string | null;
+  dictionary: DictionaryEntryDto | null;
 }
 
 /**
@@ -63,6 +64,47 @@ export interface TestProviderResult {
   latencyMs: number | null;
   reply: string | null;
   error: string | null;
+}
+
+/** 与 Rust `DictionaryDefinition` 对应。 */
+export interface DictionaryDefinitionDto {
+  partOfSpeech: string | null;
+  definition: string;
+  examples: string[];
+  synonyms: string[];
+  antonyms: string[];
+}
+
+/** 与 Rust `DictionaryEntry` 对应。 */
+export interface DictionaryEntryDto {
+  lemma: string;
+  language: string;
+  glossLanguage: string;
+  pronunciations: string[];
+  inflections: string[];
+  source: string;
+  definitions: DictionaryDefinitionDto[];
+}
+
+export interface DictionaryInfoDto {
+  id: string;
+  name: string;
+  sourceLanguage: string;
+  glossLanguage: string;
+  entryCount: number;
+}
+
+export interface ImportDictionaryRequestDto {
+  id: string;
+  name: string;
+  sourceLanguage: string;
+  glossLanguage: string;
+  path: string;
+}
+
+export interface ImportDictionaryResultDto {
+  importedEntries: number;
+  skippedLines: number;
 }
 
 export async function getAppInfo(): Promise<AppInfo> {
@@ -99,6 +141,20 @@ export async function saveAppSettings(settings: AppSettingsDto): Promise<void> {
 
 export async function selectionPermissionStatus(): Promise<boolean> {
   return invoke<boolean>("selection_permission_status");
+}
+
+export async function listDictionaries(): Promise<DictionaryInfoDto[]> {
+  return invoke<DictionaryInfoDto[]>("list_dictionaries");
+}
+
+export async function importDictionaryTsv(
+  request: ImportDictionaryRequestDto,
+): Promise<ImportDictionaryResultDto> {
+  return invoke<ImportDictionaryResultDto>("import_dictionary_tsv", { request });
+}
+
+export async function deleteDictionary(id: string): Promise<void> {
+  await invoke("delete_dictionary", { id });
 }
 
 export async function openPopup(): Promise<void> {

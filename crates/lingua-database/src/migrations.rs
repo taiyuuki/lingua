@@ -27,6 +27,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "providers",
         sql: include_str!("../migrations/0002_providers.sql"),
     },
+    Migration {
+        version: 3,
+        name: "dictionaries",
+        sql: include_str!("../migrations/0003_dictionaries.sql"),
+    },
 ];
 
 /// 当前代码支持的最高 schema 版本。

@@ -11,9 +11,11 @@ use lingua_ai::{AIRouter, AiTask, OpenAiCompatibleProvider};
 use lingua_core::translation::TranslationRequest;
 use lingua_core::{AppResult, Language};
 use lingua_database::Database;
+use lingua_dictionary::SqliteDictionaryProvider;
 use lingua_secrets::{KeyringSecretStore, SecretRef, SecretStore};
 use lingua_translation::TranslationEngine;
 use std::collections::HashSet;
+use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
 /// settings 表中的键名（集中定义，避免散落字符串）。
@@ -53,14 +55,17 @@ async fn run(app: &AppHandle) -> AppResult<()> {
     popup::show(app, PopupState::Loading).await?;
 
     // 3. 经 Router 选出 Translate 任务的 Provider，组装引擎并翻译。
+    //    引擎内部先查词典（单词 + 命中时直接返回），否则走 AI。
     let router = build_router(&state.database)?;
     let provider = router.provider_for(AiTask::Translate)?;
-    let engine = TranslationEngine::new(provider);
+    let dictionary: Arc<dyn lingua_dictionary::DictionaryProvider> =
+        Arc::new(SqliteDictionaryProvider::new(state.database.clone()));
+    let engine = TranslationEngine::new(provider).with_dictionary(Some(dictionary));
     let request = TranslationRequest::new(selected.text, target_language(&state.database)?);
     let result = engine.translate(&request).await?;
 
     // 4. 切到结果态。
-    popup::show(app, PopupState::Result(result)).await?;
+    popup::show(app, PopupState::Result(Box::new(result))).await?;
     Ok(())
 }
 

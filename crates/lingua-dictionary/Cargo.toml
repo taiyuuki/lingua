@@ -1,0 +1,20 @@
+[package]
+name = "lingua-dictionary"
+description = "词典抽象层：DictionaryProvider trait、SQLite 词典实现、TSV 导入器"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+lingua-core = { workspace = true }
+lingua-database = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+
+[lints]
+workspace = true

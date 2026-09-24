@@ -2464,6 +2464,7 @@ dependencies = [
  "lingua-ai",
  "lingua-core",
  "lingua-database",
+ "lingua-dictionary",
  "lingua-platform",
  "lingua-secrets",
  "lingua-translation",
@@ -2512,6 +2513,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lingua-dictionary"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "lingua-core",
+ "lingua-database",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "lingua-platform"
 version = "0.1.0"
 dependencies = [
@@ -2539,6 +2551,8 @@ dependencies = [
  "async-trait",
  "lingua-ai",
  "lingua-core",
+ "lingua-database",
+ "lingua-dictionary",
  "serde_json",
  "tokio",
  "tracing",

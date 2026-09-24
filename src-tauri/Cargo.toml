@@ -23,6 +23,7 @@ tauri-build = { version = "2", features = [] }
 lingua-ai = { workspace = true }
 lingua-core = { workspace = true }
 lingua-database = { workspace = true }
+lingua-dictionary = { workspace = true }
 lingua-platform = { workspace = true }
 lingua-secrets = { workspace = true }
 lingua-translation = { workspace = true }
