@@ -9,6 +9,7 @@ import {
   NForm,
   NFormItem,
   NInput,
+  NInputGroup,
   NList,
   NListItem,
   NPopconfirm,
@@ -18,6 +19,7 @@ import {
   NText,
 } from "naive-ui";
 import { TSV_FORMAT_HINT, useDictionariesStore } from "../stores/dictionaries";
+import { pickTsvFilePath } from "../lib/api";
 
 const store = useDictionariesStore();
 const {
@@ -36,6 +38,18 @@ const languageSelectOptions = computed(() =>
     value: lang.code,
   })),
 );
+
+/** 文件选择框选 TSV，直接填进路径输入（仍可手改）。 */
+async function browseTsv(): Promise<void> {
+  try {
+    const path = await pickTsvFilePath();
+    if (path) {
+      form.value.path = path;
+    }
+  } catch {
+    // 选择器不可用时静默：手输路径的旧路径仍然可用。
+  }
+}
 
 onMounted(() => {
   void store.load();
@@ -187,10 +201,18 @@ onMounted(() => {
         </n-space>
 
         <n-form-item label="TSV 文件路径">
-          <n-input
-            v-model:value="form.path"
-            placeholder="/Users/you/dictionary.tsv"
-          />
+          <n-input-group>
+            <n-input
+              v-model:value="form.path"
+              placeholder="点「浏览…」选择，或输入 .tsv 文件路径"
+            />
+            <n-button
+              secondary
+              @click="browseTsv"
+            >
+              浏览…
+            </n-button>
+          </n-input-group>
         </n-form-item>
         <n-text
           depth="3"

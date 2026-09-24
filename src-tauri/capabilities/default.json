@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Lingua 窗口的默认能力：main 与 popup",
   "windows": ["main", "popup", "ocr-selection"],
-  "permissions": ["core:default", "core:window:allow-start-dragging"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:default"]
 }

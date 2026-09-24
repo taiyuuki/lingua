@@ -208,6 +208,17 @@ export function onOcrBackgroundUpdated(handler: () => void): Promise<() => void>
   return listen("ocr://background-updated", () => handler());
 }
 
+/** 打开文件选择框选一个 TSV 词典；取消返回 null。 */
+export async function pickTsvFilePath(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selection = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "TSV 词典", extensions: ["tsv", "txt"] }],
+  });
+  return typeof selection === "string" ? selection : null;
+}
+
 /** 主题变更广播：主窗口保存设置后发，所有窗口应用新主题。 */
 export async function broadcastThemeChanged(theme: string): Promise<void> {
   await emit("theme://changed", theme);

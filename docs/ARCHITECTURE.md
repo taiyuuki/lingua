@@ -157,8 +157,8 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
    dictionary_definitions，migration 0003）、`DictionaryProvider` trait +
    SQLite 实现、TSV 导入器（行级容错、同 lemma 合并、单事务增量导入）、
    Popup 词典视图（音标 / 词性 / 释义 / 例句）。
-2. 导入用「文件路径输入」而非文件选择器（需要 `tauri-plugin-dialog`，
-   随打包阶段一起引入）；CC-CEDICT / JMdict 原生解析器未做，
+2. 导入已接文件选择器（`tauri-plugin-dialog`，随打包阶段引入）；
+   路径输入框保留可手填。CC-CEDICT / JMdict 原生解析器未做，
    现阶段用脚本转 TSV（格式见导入表单提示）。
 3. 词典路由只对「单词」生效（`classify_text` 启发式：CJK ≤4 字、
    其它 ≤1 词）；生词/词组的词典短路是后续优化。
