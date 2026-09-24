@@ -11,7 +11,7 @@ use crate::{
     state::{AppState, PopupState},
 };
 use lingua_ai::{AIProvider, ProviderKind};
-use lingua_core::{AppError, AppResult, Language, Mastery};
+use lingua_core::{AppError, AppResult, Language, Mastery, TextKind, classify_text};
 use lingua_database::providers::ProviderRecord;
 use lingua_database::{DictionaryInfo, DictionaryMeta, VocabularyFilter, VocabularyUpsert};
 use lingua_dictionary::parse_tsv;
@@ -634,7 +634,47 @@ pub struct SaveVocabularyRequest {
     pub examples: Vec<String>,
 }
 
-/// Popup 手动收藏（不累计 lookup_count）。
+/// 是否是可收藏的单词（整段/短语不支持收藏）。
+#[tauri::command]
+pub async fn is_word(text: String) -> Result<bool, AppError> {
+    Ok(classify_text(&text) == TextKind::Word && !text.trim().is_empty())
+}
+
+/// 生词本中是否已有该词（星标初始状态）。
+#[tauri::command]
+pub async fn vocabulary_word_status(
+    state: tauri::State<'_, AppState>,
+    word: String,
+    language: Option<Language>,
+) -> Result<bool, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(database
+            .find_vocabulary(&word, language.unwrap_or_else(|| Language::parse("und")))?
+            .is_some())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 从生词本移除该词（弹窗取消收藏）。
+#[tauri::command]
+pub async fn remove_vocabulary_word(
+    state: tauri::State<'_, AppState>,
+    word: String,
+    language: Option<Language>,
+) -> Result<(), AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database
+            .delete_vocabulary_word(&word, language.unwrap_or_else(|| Language::parse("und")))?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// Popup 手动收藏（不累计 lookup_count）；仅单词可收藏。
 #[tauri::command]
 pub async fn save_to_vocabulary(
     state: tauri::State<'_, AppState>,
@@ -645,6 +685,11 @@ pub async fn save_to_vocabulary(
         let word = request.word.trim().to_string();
         if word.is_empty() {
             return Err(AppError::InvalidInput("word is required".to_string()));
+        }
+        if classify_text(&word) != TextKind::Word {
+            return Err(AppError::InvalidInput(
+                "only single words can be saved to vocabulary".to_string(),
+            ));
         }
         database.upsert_vocabulary(&VocabularyUpsert {
             word,

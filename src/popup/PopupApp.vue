@@ -4,13 +4,16 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getAppSettings,
   hidePopup,
+  isWord,
   latestPopupState,
   latestStreamed,
   onPopupDelta,
   onPopupState,
   onThemeChanged,
+  removeVocabularyWord,
   saveToVocabulary,
   togglePopupPin,
+  vocabularyWordStatus,
   type PopupState,
 } from "../lib/api";
 import { applyTheme, normalizeTheme } from "../lib/theme";
@@ -22,8 +25,11 @@ const state = ref<PopupState>({ status: "loading", sourceText: null });
 const streamed = reactive({ text: "" });
 const copiedSource = ref(false);
 const copiedTranslation = ref(false);
-const saved = ref(false);
 const pinned = ref(true);
+// 收藏：仅单词可收藏；星标是双向开关（在生词本中 ⇄ 移除）。
+const starVisible = ref(false);
+const saved = ref(false);
+const favoriteWord = reactive({ word: "", language: null as string | null });
 let unlisten: (() => void) | null = null;
 let unlistenTheme: (() => void) | null = null;
 let unlistenDelta: (() => void) | null = null;
@@ -62,21 +68,46 @@ async function togglePin(): Promise<void> {
   }
 }
 
-async function saveToVocabularyBook(): Promise<void> {
-  if (state.value.status !== "result" || saved.value) {
+async function toggleSaveToVocabulary(): Promise<void> {
+  if (state.value.status !== "result" || !starVisible.value) {
     return;
   }
   try {
-    await saveToVocabulary({
-      word: state.value.sourceText.trim(),
-      language: state.value.detectedLanguage,
-      translation: state.value.translatedText,
-      source: state.value.dictionary?.source ?? "manual",
-      examples: state.value.dictionary?.definitions.flatMap((d) => d.examples).slice(0, 4) ?? [],
-    });
-    saved.value = true;
+    if (saved.value) {
+      await removeVocabularyWord(favoriteWord.word, favoriteWord.language);
+      saved.value = false;
+    } else {
+      await saveToVocabulary({
+        word: favoriteWord.word,
+        language: favoriteWord.language,
+        translation: state.value.translatedText,
+        source: state.value.dictionary?.source ?? "manual",
+        examples: state.value.dictionary?.definitions.flatMap((d) => d.examples).slice(0, 4) ?? [],
+      });
+      saved.value = true;
+    }
   } catch {
-    // 收藏失败静默：主流程不受影响。
+    // 收藏操作失败静默：主流程不受影响。
+  }
+}
+
+/** 评估收藏能力与初始状态：只有「单词」可收藏，结合词典词条数据。 */
+async function evaluateFavorite(): Promise<void> {
+  if (state.value.status !== "result") {
+    starVisible.value = false;
+    return;
+  }
+  const word = (state.value.dictionary?.lemma ?? state.value.sourceText).trim();
+  const language = state.value.detectedLanguage;
+  try {
+    starVisible.value = await isWord(word);
+    if (starVisible.value) {
+      favoriteWord.word = word;
+      favoriteWord.language = language;
+      saved.value = await vocabularyWordStatus(word, language);
+    }
+  } catch {
+    starVisible.value = false;
   }
 }
 
@@ -105,7 +136,7 @@ onMounted(async () => {
     streamed.text = "";
     copiedSource.value = false;
     copiedTranslation.value = false;
-    saved.value = false;
+    void evaluateFavorite();
   });
   unlisten = stop;
   unlistenDelta = stopDelta;
@@ -172,12 +203,12 @@ function onToolbarMouseDown(event: MouseEvent): void {
 
       <template v-if="state.status === 'result'">
         <button
+          v-if="starVisible"
           class="tool-btn"
           :class="{ 'tool-active': saved }"
           type="button"
-          title="加入生词本"
-          :disabled="saved"
-          @click="saveToVocabularyBook"
+          :title="saved ? '从生词本移除' : '加入生词本'"
+          @click="toggleSaveToVocabulary"
         >
           <svg
             viewBox="0 0 24 24"

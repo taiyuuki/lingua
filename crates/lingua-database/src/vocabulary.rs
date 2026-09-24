@@ -198,6 +198,36 @@ impl Database {
         Ok(changed > 0)
     }
 
+    /// 按「词 + 语言」查找生词记录（弹窗星标状态查询用）。
+    pub fn find_vocabulary(
+        &self,
+        word: &str,
+        language: Language,
+    ) -> AppResult<Option<VocabularyItem>> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            &format!(
+                "SELECT {ITEM_COLUMNS} FROM vocabulary WHERE word_lower = ?1 AND language = ?2"
+            ),
+            params![word.trim().to_lowercase(), language.code()],
+            row_to_item,
+        )
+        .optional()
+        .map_err(db_err)
+    }
+
+    /// 按「词 + 语言」删除生词（弹窗取消收藏用）。返回是否存在。
+    pub fn delete_vocabulary_word(&self, word: &str, language: Language) -> AppResult<bool> {
+        let conn = self.lock_conn()?;
+        let changed = conn
+            .execute(
+                "DELETE FROM vocabulary WHERE word_lower = ?1 AND language = ?2",
+                params![word.trim().to_lowercase(), language.code()],
+            )
+            .map_err(db_err)?;
+        Ok(changed > 0)
+    }
+
     pub fn delete_vocabulary(&self, id: i64) -> AppResult<bool> {
         let conn = self.lock_conn()?;
         let changed = conn
@@ -384,6 +414,39 @@ mod tests {
             db.list_vocabulary(&VocabularyFilter::default())
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn find_and_delete_by_word() {
+        let db = Database::open_in_memory().unwrap();
+        db.migrate().unwrap();
+        db.upsert_vocabulary(&lookup("Ephemeral")).unwrap();
+
+        // 大小写不敏感命中
+        let found = db.find_vocabulary("ephemeral", Language::En).unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().lookup_count, 1);
+
+        // 语言不同则查不到
+        assert!(
+            db.find_vocabulary("ephemeral", Language::Ja)
+                .unwrap()
+                .is_none()
+        );
+
+        assert!(
+            db.delete_vocabulary_word("EPHEMERAL", Language::En)
+                .unwrap()
+        );
+        assert!(
+            db.find_vocabulary("ephemeral", Language::En)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            !db.delete_vocabulary_word("ephemeral", Language::En)
+                .unwrap()
         );
     }
 

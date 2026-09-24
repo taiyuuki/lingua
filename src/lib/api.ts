@@ -220,6 +220,27 @@ export async function latestStreamed(): Promise<string> {
   return invoke<string>("latest_streamed");
 }
 
+/** 是否是可收藏的单词（短语/整段不支持）。 */
+export async function isWord(text: string): Promise<boolean> {
+  return invoke<boolean>("is_word", { text });
+}
+
+/** 生词本中是否已有该词。 */
+export async function vocabularyWordStatus(
+  word: string,
+  language: string | null,
+): Promise<boolean> {
+  return invoke<boolean>("vocabulary_word_status", { word, language });
+}
+
+/** 从生词本移除该词。 */
+export async function removeVocabularyWord(
+  word: string,
+  language: string | null,
+): Promise<void> {
+  await invoke("remove_vocabulary_word", { word, language });
+}
+
 export async function performOcrTranslation(
   x: number,
   y: number,
