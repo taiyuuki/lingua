@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { hidePopup, latestPopupState, onPopupState, type PopupState } from "../lib/api";
+import {
+  hidePopup,
+  latestPopupState,
+  onPopupState,
+  saveToVocabulary,
+  type PopupState,
+} from "../lib/api";
 
 // Popup 是独立的轻量展示窗口：本地状态 + 事件/快照双通道同步。
 // Rust 侧保证：先写快照再广播事件，因此这里先订阅再拉快照不会丢消息。
 const state = ref<PopupState>({ status: "loading" });
 const copied = ref(false);
+const saved = ref(false);
 let unlisten: (() => void) | null = null;
 
 const detectedLanguageLabel = computed(() => {
@@ -30,6 +37,24 @@ async function copyTranslation(): Promise<void> {
   }
 }
 
+async function saveToVocabularyBook(): Promise<void> {
+  if (state.value.status !== "result" || saved.value) {
+    return;
+  }
+  try {
+    await saveToVocabulary({
+      word: state.value.sourceText.trim(),
+      language: state.value.detectedLanguage,
+      translation: state.value.translatedText,
+      source: state.value.dictionary?.source ?? "manual",
+      examples: state.value.dictionary?.definitions.flatMap((d) => d.examples).slice(0, 4) ?? [],
+    });
+    saved.value = true;
+  } catch {
+    // 收藏失败静默：主流程不受影响（Phase 4 可接受）。
+  }
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
     void hidePopup();
@@ -45,6 +70,7 @@ onMounted(async () => {
   const snapshot = await latestPopupState();
   if (snapshot) {
     state.value = snapshot;
+    saved.value = false;
   }
 });
 
@@ -115,7 +141,19 @@ onUnmounted(() => {
           {{ copied ? "已复制" : "复制译文" }}
         </button>
         <button
+          v-if="!saved"
           class="btn btn-small btn-secondary"
+          type="button"
+          @click="saveToVocabularyBook"
+        >
+          ★ 收藏
+        </button>
+        <span
+          v-else
+          class="saved-hint"
+        >已收藏</span>
+        <button
+          class="btn btn-small btn-secondary popup-close"
           type="button"
           @click="hidePopup()"
         >

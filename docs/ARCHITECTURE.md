@@ -33,7 +33,7 @@ OS / Network / SQLite / Models
 | `lingua-ai` | `AIProvider` trait、`OpenAiCompatibleProvider`（reqwest/rustls）、`AIRouter`（AiTask → Provider 路由 + 默认回退）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1/2 |
 | `lingua-translation` | Translation Engine：单词 → 词典优先（释义语言须匹配目标语言），未命中/短语/句子 → AI；`prompts/translate/` 模板内嵌；AI JSON 解析失败优雅降级 | ✅ Phase 1/3 |
 | `lingua-dictionary` | `DictionaryProvider` trait、SQLite 词典实现、TSV 导入器（CC-CEDICT 等公开词典可先转 TSV 再导入） | ✅ Phase 3 |
-| `lingua-database` | SQLite（rusqlite bundled）、migration runner、settings KV、providers / dictionaries 表 DAO | ✅ Phase 0/1/3 |
+| `lingua-database` | SQLite（rusqlite bundled）、migration runner、settings KV、providers / dictionaries / vocabulary 表 DAO | ✅ Phase 0/1/3/4 |
 | `lingua-secrets` | `SecretStore` trait + keyring 实现（macOS Keychain / Windows Credential Manager / Linux Secret Service）；API Key 明文只存在这里 | ✅ Phase 1 |
 | `lingua` (src-tauri) | Tauri 壳：commands、全局快捷键、翻译 pipeline（经 Router）、Popup、Provider 管理/连接测试/应用设置命令 | ✅ Phase 1/2 |
 
@@ -132,6 +132,7 @@ Capabilities（`src-tauri/capabilities/default.json`）当前只放行
 4. 路由粒度目前只有 Translate 一个任务；Vision（Phase 6）/学习分析（Phase 9）
    接入时在 `AiTask` 枚举上扩展即可。
 
+
 ## 8. Phase 3 已知限制
 
 1. 词典已完成：三表 schema（dictionaries / dictionary_entries /
@@ -146,14 +147,27 @@ Capabilities（`src-tauri/capabilities/default.json`）当前只放行
 4. 释义语言必须等于目标语言才采用词典结果，跨多目标语言需导入
    对应方向的词典。
 
-## 9. Phase 4 待办（下一步）
+## 8b. Phase 4 已知限制（生词本）
 
-按原规划进入 **Vocabulary（生词本）**。生词本与词典分离：
-词典回答「这个词是什么意思」，生词本回答「这个词对你意味着什么」。
+1. 已完成：migration 0004（`vocabulary` / `vocabulary_reviews`）、
+   upsert 语义（自动记录累计 `lookup_count`，手动收藏不计；用户数据
+   永不被自动写入覆盖）、筛选（搜索/标签/掌握度）、Popup「★ 收藏」、
+   生词本管理 UI（编辑笔记/标签/掌握度、删除）。复习打点 DAO 就绪。
+2. 复习 UI 与 SRS 算法未做（Phase 9）；`vocabulary_reviews` 只留数据轨迹。
+3. 生词本暂与词典 DAO 同居 `lingua-database`；Phase 9 学习系统引入
+   真正领域逻辑时再评估拆 `lingua-vocabulary` crate。
+4. Anki 导出 / AI 生成学习卡片未做（后续阶段）。
 
-1. migration 0004：`vocabulary`（word, language, created_at, last_seen_at,
-   lookup_count, mastery, notes, tags, source）、`vocabulary_reviews` 表。
-2. vocabulary DAO + application service（收藏 / 标记掌握 / 笔记 / 标签）。
-3. 与划词链路打通：翻译单词时自动 `upsert` 生词记录 + `lookup_count` 自增。
-4. 生词本 UI（列表、筛选、编辑笔记/标签/掌握程度）；SRS 只留数据字段，
-   算法后续阶段实现。
+
+## 9. Phase 5 待办（下一步）
+
+按原规划进入 **OCR（截图翻译）**：
+
+1. `lingua-screenshot`：截屏 + 全屏透明选区 overlay 窗口
+   （OCR Selection Window：拖拽选区、取消、重选；平台差异大，
+   macOS 先行，注意屏幕录制权限）。
+2. `lingua-ocr`：`OcrProvider` trait（`OcrResult` 保留 text / bbox /
+   confidence / language / blocks，为未来「原位覆盖翻译」打基础）。
+3. PaddleOCR 接入（第一阶段；Vision LLM 只做后续高级 fallback）。
+4. OCR pipeline：截图 → 预处理 → OCR → 语言检测 → 翻译 → Popup 展示。
+5. `ocr_history` 表留到 Phase 8 History 一起；原始截图默认不落盘。

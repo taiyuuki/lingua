@@ -11,9 +11,9 @@ use crate::{
     state::{AppState, PopupState},
 };
 use lingua_ai::{AIProvider, ProviderKind};
-use lingua_core::{AppError, AppResult, Language};
+use lingua_core::{AppError, AppResult, Language, Mastery};
 use lingua_database::providers::ProviderRecord;
-use lingua_database::{DictionaryInfo, DictionaryMeta};
+use lingua_database::{DictionaryInfo, DictionaryMeta, VocabularyFilter, VocabularyUpsert};
 use lingua_dictionary::parse_tsv;
 use lingua_secrets::{KeyringSecretStore, SecretRef, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -478,6 +478,112 @@ pub async fn delete_dictionary(
     let database = state.database.clone();
     tauri::async_runtime::spawn_blocking(move || {
         database.delete_dictionary(&id)?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+// ---------- 生词本（Phase 4） ----------
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VocabularyFilterDto {
+    pub search: Option<String>,
+    pub tag: Option<String>,
+    pub language: Option<Language>,
+    pub mastery: Option<Mastery>,
+    pub limit: u32,
+}
+
+#[tauri::command]
+pub async fn list_vocabulary(
+    state: tauri::State<'_, AppState>,
+    filter: Option<VocabularyFilterDto>,
+) -> Result<Vec<lingua_core::VocabularyItem>, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let dto = filter.unwrap_or_default();
+        let filter = VocabularyFilter {
+            search: dto.search,
+            tag: dto.tag,
+            language: dto.language,
+            mastery: dto.mastery,
+            limit: dto.limit,
+        };
+        database.list_vocabulary(&filter)
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+#[tauri::command]
+pub async fn update_vocabulary(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    notes: String,
+    tags: Vec<String>,
+    mastery: Mastery,
+) -> Result<(), AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database.update_vocabulary(id, &notes, &tags, mastery)?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+#[tauri::command]
+pub async fn delete_vocabulary(state: tauri::State<'_, AppState>, id: i64) -> Result<(), AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database.delete_vocabulary(id)?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+#[tauri::command]
+pub async fn vocabulary_tags(state: tauri::State<'_, AppState>) -> Result<Vec<String>, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.vocabulary_tags())
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveVocabularyRequest {
+    pub word: String,
+    pub language: Option<Language>,
+    pub translation: Option<String>,
+    pub source: Option<String>,
+    #[serde(default)]
+    pub examples: Vec<String>,
+}
+
+/// Popup 手动收藏（不累计 lookup_count）。
+#[tauri::command]
+pub async fn save_to_vocabulary(
+    state: tauri::State<'_, AppState>,
+    request: SaveVocabularyRequest,
+) -> Result<(), AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let word = request.word.trim().to_string();
+        if word.is_empty() {
+            return Err(AppError::InvalidInput("word is required".to_string()));
+        }
+        database.upsert_vocabulary(&VocabularyUpsert {
+            word,
+            language: request.language.unwrap_or_else(|| Language::parse("und")),
+            translation: request.translation,
+            source: request.source.unwrap_or_else(|| "manual".to_string()),
+            examples: request.examples,
+            bump_lookup: false,
+        })?;
         Ok(())
     })
     .await

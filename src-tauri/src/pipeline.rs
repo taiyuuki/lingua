@@ -8,9 +8,10 @@
 use crate::popup;
 use crate::state::{AppState, PopupState};
 use lingua_ai::{AIRouter, AiTask, OpenAiCompatibleProvider};
-use lingua_core::translation::TranslationRequest;
+use lingua_core::translation::{TextKind, TranslationRequest, classify_text};
 use lingua_core::{AppResult, Language};
 use lingua_database::Database;
+use lingua_database::VocabularyUpsert;
 use lingua_dictionary::SqliteDictionaryProvider;
 use lingua_secrets::{KeyringSecretStore, SecretRef, SecretStore};
 use lingua_translation::TranslationEngine;
@@ -64,8 +65,53 @@ async fn run(app: &AppHandle) -> AppResult<()> {
     let request = TranslationRequest::new(selected.text, target_language(&state.database)?);
     let result = engine.translate(&request).await?;
 
-    // 4. 切到结果态。
+    // 4. 单词查询自动记入生词本（短语/句子不记）；
+    //    在 result 移入 popup 前先取出需要的数据，写库放在 popup 展示之后。
+    let vocabulary_record = if classify_text(&request.text) == TextKind::Word {
+        Some(VocabularyUpsert {
+            word: request.text.clone(),
+            language: result
+                .detected_language
+                .clone()
+                .or_else(|| request.source_language.clone())
+                .unwrap_or_else(|| Language::parse("und")),
+            translation: Some(result.translated_text.clone()),
+            source: result
+                .dictionary
+                .as_ref()
+                .map_or_else(|| "ai".to_string(), |entry| entry.source.clone()),
+            examples: result
+                .dictionary
+                .as_ref()
+                .map(|entry| {
+                    entry
+                        .definitions
+                        .iter()
+                        .flat_map(|definition| definition.examples.iter())
+                        .take(4)
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default(),
+            bump_lookup: true,
+        })
+    } else {
+        None
+    };
+
+    // 5. 切到结果态。
     popup::show(app, PopupState::Result(Box::new(result))).await?;
+
+    if let Some(record) = vocabulary_record {
+        let database = state.database.clone();
+        let recorded =
+            tauri::async_runtime::spawn_blocking(move || database.upsert_vocabulary(&record)).await;
+        match recorded {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => tracing::warn!(error = %error, "failed to record vocabulary lookup"),
+            Err(error) => tracing::warn!(error = %error, "vocabulary record task panicked"),
+        }
+    }
     Ok(())
 }
 

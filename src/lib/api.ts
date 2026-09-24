@@ -107,6 +107,40 @@ export interface ImportDictionaryResultDto {
   skippedLines: number;
 }
 
+export type Mastery = "new" | "learning" | "mastered";
+
+export interface VocabularyItemDto {
+  id: number;
+  word: string;
+  language: string;
+  translation: string | null;
+  notes: string;
+  tags: string[];
+  mastery: Mastery;
+  lookupCount: number;
+  reviewCount: number;
+  source: string;
+  examples: string[];
+  createdAt: string;
+  lastSeenAt: string;
+}
+
+export interface VocabularyFilterDto {
+  search: string | null;
+  tag: string | null;
+  language: string | null;
+  mastery: Mastery | null;
+  limit: number;
+}
+
+export interface SaveVocabularyRequestDto {
+  word: string;
+  language: string | null;
+  translation: string | null;
+  source: string | null;
+  examples: string[];
+}
+
 export async function getAppInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_info");
 }
@@ -155,6 +189,33 @@ export async function importDictionaryTsv(
 
 export async function deleteDictionary(id: string): Promise<void> {
   await invoke("delete_dictionary", { id });
+}
+
+export async function listVocabulary(
+  filter: VocabularyFilterDto,
+): Promise<VocabularyItemDto[]> {
+  return invoke<VocabularyItemDto[]>("list_vocabulary", { filter });
+}
+
+export async function updateVocabulary(
+  id: number,
+  notes: string,
+  tags: string[],
+  mastery: Mastery,
+): Promise<void> {
+  await invoke("update_vocabulary", { id, notes, tags, mastery });
+}
+
+export async function deleteVocabulary(id: number): Promise<void> {
+  await invoke("delete_vocabulary", { id });
+}
+
+export async function getVocabularyTags(): Promise<string[]> {
+  return invoke<string[]>("vocabulary_tags");
+}
+
+export async function saveToVocabulary(request: SaveVocabularyRequestDto): Promise<void> {
+  await invoke("save_to_vocabulary", { request });
 }
 
 export async function openPopup(): Promise<void> {

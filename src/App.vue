@@ -5,6 +5,7 @@ import { useAppStore } from "./stores/app";
 import { useSettingsStore } from "./stores/settings";
 import ProviderManager from "./components/ProviderManager.vue";
 import DictionaryManager from "./components/DictionaryManager.vue";
+import VocabularyManager from "./components/VocabularyManager.vue";
 import RouterSettings from "./components/RouterSettings.vue";
 
 const appStore = useAppStore();
@@ -64,6 +65,7 @@ onMounted(() => {
 
     <ProviderManager />
     <DictionaryManager />
+    <VocabularyManager />
     <RouterSettings />
 
     <section class="card">

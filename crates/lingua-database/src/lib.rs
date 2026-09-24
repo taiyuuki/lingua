@@ -11,9 +11,11 @@ pub mod dictionaries;
 pub mod migrations;
 pub mod providers;
 pub mod settings;
+pub mod vocabulary;
 
 pub use dictionaries::{DictionaryInfo, DictionaryMeta};
 pub use migrations::{MIGRATIONS, Migration, latest_version};
+pub use vocabulary::{VocabularyFilter, VocabularyUpsert};
 
 use lingua_core::{AppError, AppResult};
 use rusqlite::Connection;

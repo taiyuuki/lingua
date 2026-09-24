@@ -4,8 +4,8 @@
 
 技术栈：**Tauri 2 + Vue 3 + TypeScript + Rust workspace + SQLite**。
 
-> 当前状态：**Phase 3 —— 本地词典已完成**（划词翻译 + 多 Provider 路由之上）：
-> 单词翻译词典优先，命中直接出结果（快、离线、零成本）。
+> 当前状态：**Phase 4 —— 生词本已完成**：划词查过的单词自动记录（查询次数、
+> 最近译文、词典例句），可加笔记/标签/掌握程度；Popup 可手动收藏。
 > 在任意应用选中文字 → 全局快捷键 → Popup 显示 AI 翻译。
 > 架构决策与阶段规划见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -19,6 +19,7 @@ lingua/
 │   ├── lingua-ai/           # AI 抽象：AIProvider trait、OpenAI-compatible 实现、AIRouter 任务路由
 │   ├── lingua-translation/  # Translation Engine：词典优先路由 + prompts/ 模板
 │   ├── lingua-dictionary/   # DictionaryProvider trait、SQLite 词典、TSV 导入器
+│   │                        # （生词本 DAO 在 lingua-database，SRS 数据字段已就位）
 │   ├── lingua-database/     # SQLite：migration runner、settings、providers 表
 │   └── lingua-secrets/      # OS 密钥库（Keychain / Credential Manager / Secret Service）
 ├── src-tauri/               # Tauri 应用壳：commands、全局快捷键、翻译 pipeline、Popup
@@ -61,7 +62,7 @@ pnpm lint               # ESLint
 pnpm test               # vitest 前端测试
 
 cargo check --workspace --all-targets   # Rust 快速检查
-cargo test --workspace                  # Rust 测试（74 个）
+cargo test --workspace                  # Rust 测试（83 个）
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
@@ -77,14 +78,14 @@ RUST_LOG=lingua=debug pnpm tauri dev
 
 约束：API Key、用户划词文本、截图内容不写日志（划词只记录字符数）。
 
-## 验收状态（Phase 3）
+## 验收状态（Phase 4）
 
 | 检查项 | 命令 | 状态 |
 |--------|------|------|
 | 前端安装 | `pnpm install` | ✅ |
 | 前端构建 | `pnpm build` | ✅（main + popup 双入口） |
 | Rust 检查 | `cargo check --workspace --all-targets` | ✅ |
-| Rust 测试 | `cargo test --workspace` | ✅ 74 passed |
+| Rust 测试 | `cargo test --workspace` | ✅ 83 passed |
 | Lint | `cargo clippy -D warnings` / `pnpm lint` | ✅ |
 | 应用链接 | `cargo build --workspace` | ✅ |
 | 划词→翻译→Popup 全链路 | `pnpm tauri dev` 手动验证 | ⚠️ 需真机人工验证 |

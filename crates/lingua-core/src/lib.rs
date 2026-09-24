@@ -12,6 +12,7 @@ pub mod error;
 pub mod language;
 pub mod selection;
 pub mod translation;
+pub mod vocabulary;
 
 pub use dictionary::{DictionaryDefinition, DictionaryEntry};
 pub use error::{AppError, AppResult};
@@ -20,3 +21,4 @@ pub use selection::{Rect, SelectedText, SelectionSource};
 pub use translation::{
     TextKind, TranslationMode, TranslationRequest, TranslationResult, classify_text,
 };
+pub use vocabulary::{Mastery, VocabularyItem};

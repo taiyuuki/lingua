@@ -446,7 +446,73 @@ body {
 .popup-actions {
   flex-shrink: 0;
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.popup-close {
+  margin-left: auto;
+}
+
+.saved-hint {
+  color: #2e9e5b;
+  font-size: 12.5px;
+}
+
+.mastery-new {
+  background: #eef2ff;
+  color: #4f6ef7;
+  border-color: transparent;
+}
+
+.mastery-learning {
+  background: #fdf7ec;
+  color: #a06a1f;
+  border-color: transparent;
+}
+
+.mastery-mastered {
+  background: #edf9f1;
+  color: #2e9e5b;
+  border-color: transparent;
+}
+
+.vocab-filters {
+  margin-bottom: 8px;
+}
+
+.count-hint {
+  font-size: 12.5px;
+}
+
+.vocab-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.vocab-row .provider-actions {
+  margin-top: 8px;
+}
+
+.vocab-edit {
+  padding: 4px 0;
+}
+
+.vocab-edit-word {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+textarea {
+  resize: vertical;
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  width: 100%;
 }
 
 .popup-error {

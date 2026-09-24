@@ -76,6 +76,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::list_dictionaries,
             commands::import_dictionary_tsv,
             commands::delete_dictionary,
+            commands::list_vocabulary,
+            commands::update_vocabulary,
+            commands::delete_vocabulary,
+            commands::vocabulary_tags,
+            commands::save_to_vocabulary,
         ])
         .run(tauri::generate_context!())?;
     Ok(())
