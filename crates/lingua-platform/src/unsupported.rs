@@ -1,8 +1,7 @@
-//! 非 macOS 平台的占位实现。
+//! Linux 平台的占位实现（Windows 已有真实实现，见 `windows` 模块）。
 //!
-//! Phase 10（跨平台完善）替换为真实实现：
-//! * Windows：UI Automation（`TextPattern`）+ 剪贴板 fallback；
-//! * Linux：AT-SPI2 + 剪贴板 fallback（Wayland 限制另见架构文档）。
+//! Phase 10（跨平台完善）替换为 AT-SPI2 + 剪贴板 fallback
+//! （Wayland 限制另见架构文档）。
 //!
 //! 刻意返回明确的 `Platform` 错误而不是假实现。
 

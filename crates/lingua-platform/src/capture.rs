@@ -38,30 +38,45 @@ pub fn crop_image(image: &OcrImage, rect_px: [u32; 4]) -> AppResult<OcrImage> {
 }
 
 /// 屏幕录制权限是否已授予。
+/// Windows 的 GDI 截图不需要任何系统权限，视为已授予；
+/// Linux 无实现时返回 `false`。
 pub fn screen_recording_granted() -> bool {
     #[cfg(target_os = "macos")]
     return crate::macos::ffi::is_screen_recording_granted();
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return true;
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     false
 }
 
 /// 请求屏幕录制权限（macOS 会弹系统授权框）。返回是否已授予。
+/// Windows / 其它平台无权限概念，直接返回授权结果。
 pub fn request_screen_recording_access() -> bool {
     #[cfg(target_os = "macos")]
     return crate::macos::ffi::request_screen_recording_access();
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return true;
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     false
 }
 
-/// 截取屏幕指定区域（全局逻辑坐标，左上角原点），返回 PNG 图像。
-/// 阻塞调用（内部起子进程），上层用 `spawn_blocking` 包裹。
+/// 截取屏幕指定区域，返回 PNG 图像。阻塞调用，上层用 `spawn_blocking` 包裹。
+///
+/// 坐标约定：调用方传入 tauri `Monitor` 的物理像素矩形 ——
+/// Windows（GDI，物理像素）与 macOS（`screencapture -R`，全局点；
+/// tao 在 macOS 上报的「物理」即点）各自解释，语义一致。
 pub fn capture_region(rect: &Rect) -> AppResult<OcrImage> {
     #[cfg(target_os = "macos")]
     return capture_region_macos(rect);
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return capture_region_windows(rect);
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = rect;
         Err(AppError::Platform(
@@ -114,4 +129,20 @@ fn capture_region_macos(rect: &Rect) -> AppResult<OcrImage> {
 
     let _ = std::fs::remove_file(&path);
     result
+}
+
+/// Windows：GDI BitBlt 截图（物理像素），无需系统权限。
+#[cfg(target_os = "windows")]
+fn capture_region_windows(rect: &Rect) -> AppResult<OcrImage> {
+    if rect.width < 1.0 || rect.height < 1.0 {
+        return Err(AppError::InvalidInput(
+            "capture region is empty".to_string(),
+        ));
+    }
+    crate::windows::ffi::capture_screen_region_px([
+        rect.x.round() as i32,
+        rect.y.round() as i32,
+        rect.width.round() as i32,
+        rect.height.round() as i32,
+    ])
 }
