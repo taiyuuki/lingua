@@ -410,6 +410,16 @@ pub async fn open_popup(app: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
+/// 切换 Popup 置顶（工具栏图钉），返回切换后的状态。
+#[tauri::command]
+pub async fn toggle_popup_pin(app: tauri::AppHandle) -> Result<bool, AppError> {
+    let window = crate::popup::ensure_window(&app)?;
+    let next = !crate::popup::popup_pinned();
+    window.set_always_on_top(next).map_err(platform_error)?;
+    crate::popup::set_popup_pinned(next);
+    Ok(next)
+}
+
 /// 隐藏 Popup（前端按 Esc 时调用）。
 #[tauri::command]
 pub async fn hide_popup(app: tauri::AppHandle) -> Result<(), AppError> {

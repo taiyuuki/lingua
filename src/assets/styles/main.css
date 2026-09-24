@@ -305,32 +305,96 @@ body {
   color: var(--color-danger);
 }
 
-/* ---------- Popup 窗口 ---------- */
+/* ---------- Popup 窗口（Bob 风格深色卡片） ---------- */
 
 .popup-root {
+  --pd-bg: #212529;
+  --pd-card: #2b3036;
+  --pd-border: #3a4047;
+  --pd-text: #e8eaed;
+  --pd-sub: #9aa0a6;
+  --pd-accent: #7f97ff;
+
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
-  background: var(--color-surface);
+  padding: 8px 10px 6px;
+  background: var(--pd-bg);
+  color: var(--pd-text);
   overflow: hidden;
 }
 
+/* 工具栏 */
+.popup-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.tool-spacer {
+  flex: 1;
+}
+
+.tool-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--pd-sub);
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tool-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.tool-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--pd-text);
+}
+
+.tool-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.tool-btn.tool-active {
+  color: var(--pd-accent);
+}
+
+/* 内容滚动区 */
+.popup-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+
 .popup-loading {
-  height: 100%;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: var(--color-text-secondary);
+  color: var(--pd-sub);
 }
 
 .spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent);
+  border: 2px solid var(--pd-border);
+  border-top-color: var(--pd-accent);
   border-radius: 50%;
   animation: lingua-spin 0.8s linear infinite;
 }
@@ -341,54 +405,64 @@ body {
   }
 }
 
-/* 内容滚动区：吃掉剩余空间，内容超长时整体滚动，
-   译文永远不会被 flex 压扁（操作按钮固定在底部）。 */
-.popup-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-right: 4px;
-}
-
-.popup-section {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
+/* 原文区 */
 .popup-source {
   margin: 0;
-  font-size: 12.5px;
-  color: var(--color-text-secondary);
-  max-height: 3.9em;
-  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--pd-text);
+  max-height: 6.2em;
+  overflow-y: auto;
   user-select: text;
 }
 
-.popup-meta {
+.popup-source-meta {
   display: flex;
+  align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .chip {
   display: inline-block;
-  padding: 0 8px;
+  padding: 1px 8px;
   border-radius: 999px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--pd-border);
   font-size: 11px;
-  color: var(--color-text-secondary);
+  color: var(--pd-sub);
+}
+
+/* 结果卡片 */
+.result-card {
+  background: var(--pd-card);
+  border: 1px solid var(--pd-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.result-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.result-engine {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pd-accent);
 }
 
 .popup-translation {
   margin: 0;
-  font-size: 17px;
-  font-weight: 550;
-  line-height: 1.5;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--pd-text);
   user-select: text;
   overflow-wrap: anywhere;
 }
@@ -397,126 +471,55 @@ body {
   flex-shrink: 0;
   margin: 0;
   padding: 0 0 0 18px;
-  color: var(--color-text-secondary);
-  font-size: 13px;
+  color: var(--pd-sub);
+  font-size: 12.5px;
 }
 
 .popup-explanation {
   flex-shrink: 0;
   margin: 0;
   padding: 8px 10px;
-  border-left: 2px solid var(--color-border);
-  color: var(--color-text-secondary);
+  border-left: 2px solid var(--pd-border);
+  border-radius: 2px;
+  background: var(--pd-card);
+  color: var(--pd-sub);
   font-size: 12.5px;
   user-select: text;
 }
 
+/* 词典视图 */
 .popup-dictionary {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.chip-source {
-  margin-left: auto;
-}
-
 .popup-dict-definitions {
   margin: 0;
-  padding: 0 0 0 18px;
+  padding: 0 0 0 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12.5px;
   user-select: text;
 }
 
 .popup-dict-text {
   margin-left: 4px;
+  color: var(--pd-text);
 }
 
 .popup-dict-examples {
   margin: 2px 0 0;
   padding: 0 0 0 14px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  color: var(--pd-sub);
+  font-size: 11.5px;
   font-style: italic;
 }
 
-.popup-actions {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.popup-close {
-  margin-left: auto;
-}
-
-.saved-hint {
-  color: #2e9e5b;
-  font-size: 12.5px;
-}
-
-.mastery-new {
-  background: #eef2ff;
-  color: #4f6ef7;
-  border-color: transparent;
-}
-
-.mastery-learning {
-  background: #fdf7ec;
-  color: #a06a1f;
-  border-color: transparent;
-}
-
-.mastery-mastered {
-  background: #edf9f1;
-  color: #2e9e5b;
-  border-color: transparent;
-}
-
-.vocab-filters {
-  margin-bottom: 8px;
-}
-
-.count-hint {
-  font-size: 12.5px;
-}
-
-.vocab-row {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.vocab-row .provider-actions {
-  margin-top: 8px;
-}
-
-.vocab-edit {
-  padding: 4px 0;
-}
-
-.vocab-edit-word {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-textarea {
-  resize: vertical;
-  font: inherit;
-  padding: 7px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  width: 100%;
-}
-
+/* 错误 */
 .popup-error {
-  height: 100%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -528,20 +531,34 @@ textarea {
 .popup-error-title {
   margin: 0;
   font-weight: 600;
-  color: var(--color-danger);
+  color: #ff8a8a;
 }
 
 .popup-error-message {
   margin: 0;
   font-size: 12.5px;
-  color: var(--color-text-secondary);
+  color: var(--pd-sub);
   max-width: 90%;
 }
 
 .popup-error-hint {
   margin: 0;
   font-size: 12px;
-  color: #a06a1f;
+  color: #d8a657;
+}
+
+/* 底栏 */
+.popup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.popup-brand {
+  font-size: 11px;
+  color: var(--pd-sub);
+  letter-spacing: 0.4px;
 }
 
 /* ---------- OCR 选区 overlay ---------- */

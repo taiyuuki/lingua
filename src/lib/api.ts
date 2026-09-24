@@ -261,6 +261,11 @@ export async function hidePopup(): Promise<void> {
   await invoke("hide_popup");
 }
 
+/** 切换 Popup 置顶（工具栏图钉）；返回切换后的状态。 */
+export async function togglePopupPin(): Promise<boolean> {
+  return invoke<boolean>("toggle_popup_pin");
+}
+
 export async function latestPopupState(): Promise<PopupState | null> {
   return invoke<PopupState | null>("latest_popup_state");
 }

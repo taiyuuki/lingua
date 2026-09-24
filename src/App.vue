@@ -58,7 +58,7 @@ onMounted(() => {
       <p class="muted">
         在任意应用中选中文本，按全局快捷键
         <code class="kbd">{{ shortcut || "alt+t" }}</code>
-        ，翻译结果会在光标附近的 Popup 中显示。按 <code class="kbd">Esc</code>
+        ，翻译结果会在屏幕中央的 Popup 中显示。按 <code class="kbd">Esc</code>
         或点击窗口外部可关闭 Popup。
       </p>
       <p

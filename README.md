@@ -40,7 +40,7 @@ lingua/
    模型 / API Key，Key 存入系统钥匙串），可用「测试」按钮做连接检查；
    在「路由与快捷键」里选默认 Provider / 翻译任务 Provider / 目标语言。
 2. 在任意应用中选中文本，按 `alt+t`（可在设置里改）。
-3. 翻译结果在光标附近的 Popup 中显示；`Esc` 或点击外部关闭。
+3. 翻译结果在屏幕中央的 Popup 中显示；`Esc` 或点击外部关闭。
 4. 主窗口「截图翻译」按钮 → 在屏幕上拖拽框选 → 识别的文字自动走
    AI 翻译并在 Popup 显示。OCR 引擎在「路由与快捷键」里配置
    （默认本机 tesseract；PaddleOCR 走 `scripts/paddleocr_server.py` sidecar）。

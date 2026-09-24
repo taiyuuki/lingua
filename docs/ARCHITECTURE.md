@@ -79,7 +79,7 @@ pipeline::run_translation_pipeline
     │        ↓ 失败/不支持/无选区
     │      剪贴板 fallback（备份 → Cmd+C → 轮询 600ms → 恢复）
     │      权限缺失 → AppError::Permission（不污染剪贴板，直接报错）
-    ↓ 2. Popup 弹出（光标附近定位，显示加载态，抢焦点以支持 Esc）
+    ↓ 2. Popup 弹出（固定于主显示器中央，显示加载态，抢焦点以支持 Esc）
     ↓ 3. TranslationEngine
     │      prompts/translate 模板渲染 → OpenAI-compatible POST /chat/completions
     │      api_key 从 OS 密钥库读取；配置从 providers 表读取
@@ -92,7 +92,7 @@ pipeline::run_translation_pipeline
 | 窗口 | label | 入口 | 状态 |
 |------|-------|------|------|
 | 主窗口 | `main` | `tauri.conf.json` | ✅ Phase 0 |
-| Popup | `popup` | `popup.html`（Vite 多入口） | ✅ 骨架：无边框、置顶、skip taskbar、失焦自动隐藏（`on_window_event`）；Phase 1 加按选区 `rect` 定位与 Esc 关闭 |
+| Popup | `popup` | `popup.html`（Vite 多入口） | ✅ 无边框、置顶（工具栏图钉可切换）、skip taskbar、失焦自动隐藏、固定居中定位；Esc 关闭 |
 | OCR 选区 | `ocr-selection` | Phase 5 | 计划：全屏透明 overlay，独立实现注意 Wayland 限制 |
 | Settings / Vocabulary | 复用 main 路由或独立窗口 | Phase 2/4 | 待定 |
 

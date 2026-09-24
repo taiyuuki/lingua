@@ -5,35 +5,50 @@ import {
   latestPopupState,
   onPopupState,
   saveToVocabulary,
+  togglePopupPin,
   type PopupState,
 } from "../lib/api";
 
-// Popup 是独立的轻量展示窗口：本地状态 + 事件/快照双通道同步。
-// Rust 侧保证：先写快照再广播事件，因此这里先订阅再拉快照不会丢消息。
+// 快照同款「事件 + 快照」双通道；窗口复用，靠通知保持最新状态。
+// 布局参考 Bob：顶部工具栏（置顶/收藏/复制原文）→ 原文区 → 译文卡片。
 const state = ref<PopupState>({ status: "loading" });
-const copied = ref(false);
+const copiedSource = ref(false);
+const copiedTranslation = ref(false);
 const saved = ref(false);
+const pinned = ref(true);
 let unlisten: (() => void) | null = null;
 
-const detectedLanguageLabel = computed(() => {
-  if (state.value.status !== "result" || !state.value.detectedLanguage) {
-    return null;
-  }
-  return state.value.detectedLanguage;
-});
+const engineLabel = computed(() =>
+  state.value.status === "result" ? (state.value.dictionary?.source ?? "AI 翻译") : "",
+);
+const detectedLanguageLabel = computed(() =>
+  state.value.status === "result" ? state.value.detectedLanguage : null,
+);
 
-async function copyTranslation(): Promise<void> {
-  if (state.value.status !== "result") {
-    return;
-  }
+async function copyText(text: string, which: "source" | "translation"): Promise<void> {
   try {
-    await navigator.clipboard.writeText(state.value.translatedText);
-    copied.value = true;
-    window.setTimeout(() => {
-      copied.value = false;
-    }, 1500);
+    await navigator.clipboard.writeText(text);
+    if (which === "source") {
+      copiedSource.value = true;
+      window.setTimeout(() => {
+        copiedSource.value = false;
+      }, 1500);
+    } else {
+      copiedTranslation.value = true;
+      window.setTimeout(() => {
+        copiedTranslation.value = false;
+      }, 1500);
+    }
   } catch {
-    // 剪贴板不可用时静默忽略（Phase 1 可接受）。
+    // 剪贴板不可用时静默忽略。
+  }
+}
+
+async function togglePin(): Promise<void> {
+  try {
+    pinned.value = await togglePopupPin();
+  } catch {
+    // 切换失败保持原状态。
   }
 }
 
@@ -51,7 +66,7 @@ async function saveToVocabularyBook(): Promise<void> {
     });
     saved.value = true;
   } catch {
-    // 收藏失败静默：主流程不受影响（Phase 4 可接受）。
+    // 收藏失败静默：主流程不受影响。
   }
 }
 
@@ -65,12 +80,14 @@ onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
   const stop = await onPopupState((next) => {
     state.value = next;
+    copiedSource.value = false;
+    copiedTranslation.value = false;
+    saved.value = false;
   });
   unlisten = stop;
   const snapshot = await latestPopupState();
   if (snapshot) {
     state.value = snapshot;
-    saved.value = false;
   }
 });
 
@@ -82,102 +99,255 @@ onUnmounted(() => {
 
 <template>
   <div class="popup-root">
+    <!-- 工具栏：置顶 | 收藏 / 复制原文 -->
+    <div class="popup-toolbar">
+      <button
+        class="tool-btn"
+        :class="{ 'tool-active': pinned }"
+        type="button"
+        title="置顶"
+        @click="togglePin"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M12 21s-6-5.2-6-10a6 6 0 1 1 12 0c0 4.8-6 10-6 10z" />
+          <circle
+            cx="12"
+            cy="11"
+            r="2.2"
+          />
+        </svg>
+      </button>
+
+      <div class="tool-spacer" />
+
+      <template v-if="state.status === 'result'">
+        <button
+          class="tool-btn"
+          :class="{ 'tool-active': saved }"
+          type="button"
+          title="加入生词本"
+          :disabled="saved"
+          @click="saveToVocabularyBook"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            :fill="saved ? 'currentColor' : 'none'"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linejoin="round"
+          >
+            <path d="M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.4l6.1-.8z" />
+          </svg>
+        </button>
+        <button
+          class="tool-btn"
+          type="button"
+          title="复制原文"
+          @click="copyText(state.sourceText, 'source')"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect
+              x="9"
+              y="9"
+              width="11"
+              height="11"
+              rx="2"
+            />
+            <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+          </svg>
+        </button>
+      </template>
+    </div>
+
     <!-- 加载中 -->
-    <template v-if="state.status === 'loading'">
-      <div class="popup-loading">
+    <div
+      v-if="state.status === 'loading'"
+      class="popup-loading"
+    >
+      <span
+        class="spinner"
+        aria-hidden="true"
+      />
+      <span>正在翻译…</span>
+    </div>
+
+    <!-- 翻译结果 -->
+    <div
+      v-else-if="state.status === 'result'"
+      class="popup-scroll"
+    >
+      <p class="popup-source">
+        {{ state.sourceText }}
+      </p>
+      <div class="popup-source-meta">
+        <button
+          class="tool-btn"
+          type="button"
+          :title="copiedSource ? '已复制' : '复制原文'"
+          @click="copyText(state.sourceText, 'source')"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect
+              x="9"
+              y="9"
+              width="11"
+              height="11"
+              rx="2"
+            />
+            <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+          </svg>
+        </button>
         <span
-          class="spinner"
-          aria-hidden="true"
-        />
-        <span>正在翻译…</span>
+          v-if="detectedLanguageLabel"
+          class="chip"
+        >识别为 {{ detectedLanguageLabel }}</span>
       </div>
-    </template>
 
-    <!-- 翻译结果：内容整体滚动，操作按钮固定在底部 -->
-    <template v-else-if="state.status === 'result'">
-      <div class="popup-scroll">
-        <div class="popup-section">
-          <p class="popup-source">
-            {{ state.sourceText }}
-          </p>
-          <div class="popup-meta">
-            <span
-              v-if="detectedLanguageLabel"
-              class="chip"
-            >{{ detectedLanguageLabel }}</span>
-          </div>
+      <!-- 译文卡片 -->
+      <div class="result-card">
+        <div class="result-card-header">
+          <span class="result-engine">{{ engineLabel }}</span>
+          <button
+            class="tool-btn"
+            type="button"
+            :title="copiedTranslation ? '已复制' : '复制译文'"
+            @click="copyText(state.translatedText, 'translation')"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect
+                x="9"
+                y="9"
+                width="11"
+                height="11"
+                rx="2"
+              />
+              <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+            </svg>
+          </button>
         </div>
-
         <p class="popup-translation">
           {{ state.translatedText }}
         </p>
 
-        <ul
-          v-if="state.alternatives.length > 0"
-          class="popup-alternatives"
+        <!-- 词典视图：词条释义/例句 -->
+        <div
+          v-if="state.dictionary"
+          class="popup-dictionary"
         >
-          <li
-            v-for="alternative in state.alternatives"
-            :key="alternative"
+          <ol class="popup-dict-definitions">
+            <li
+              v-for="(definition, index) in state.dictionary.definitions.slice(0, 8)"
+              :key="index"
+            >
+              <span
+                v-if="definition.partOfSpeech"
+                class="chip"
+              >{{ definition.partOfSpeech }}</span>
+              <span class="popup-dict-text">{{ definition.definition }}</span>
+              <ul
+                v-if="definition.examples.length > 0"
+                class="popup-dict-examples"
+              >
+                <li
+                  v-for="example in definition.examples.slice(0, 2)"
+                  :key="example"
+                >
+                  {{ example }}
+                </li>
+              </ul>
+            </li>
+          </ol>
+        </div>
+
+        <template v-else>
+          <ul
+            v-if="state.alternatives.length > 0"
+            class="popup-alternatives"
           >
-            {{ alternative }}
-          </li>
-        </ul>
-
-        <p
-          v-if="state.explanation"
-          class="popup-explanation"
-        >
-          {{ state.explanation }}
-        </p>
+            <li
+              v-for="alternative in state.alternatives"
+              :key="alternative"
+            >
+              {{ alternative }}
+            </li>
+          </ul>
+        </template>
       </div>
 
-      <div class="popup-actions">
-        <button
-          class="btn btn-small"
-          type="button"
-          @click="copyTranslation"
-        >
-          {{ copied ? "已复制" : "复制译文" }}
-        </button>
-        <button
-          v-if="!saved"
-          class="btn btn-small btn-secondary"
-          type="button"
-          @click="saveToVocabularyBook"
-        >
-          ★ 收藏
-        </button>
-        <span
-          v-else
-          class="saved-hint"
-        >已收藏</span>
-        <button
-          class="btn btn-small btn-secondary popup-close"
-          type="button"
-          @click="hidePopup()"
-        >
-          关闭
-        </button>
-      </div>
-    </template>
+      <p
+        v-if="state.explanation"
+        class="popup-explanation"
+      >
+        {{ state.explanation }}
+      </p>
+    </div>
 
     <!-- 错误 -->
-    <template v-else>
-      <div class="popup-error">
-        <p class="popup-error-title">
-          {{ state.kind === "no_selection" ? "未选中文本" : "翻译失败" }}
-        </p>
-        <p class="popup-error-message">
-          {{ state.message }}
-        </p>
-        <p
-          v-if="state.kind === 'permission'"
-          class="popup-error-hint"
+    <div
+      v-else
+      class="popup-error"
+    >
+      <p class="popup-error-title">
+        {{ state.kind === "no_selection" ? "未选中文本" : "翻译失败" }}
+      </p>
+      <p class="popup-error-message">
+        {{ state.message }}
+      </p>
+      <p
+        v-if="state.kind === 'permission'"
+        class="popup-error-hint"
+      >
+        macOS 需要在「系统设置 → 隐私与安全性」中授权本应用。
+      </p>
+    </div>
+
+    <!-- 底栏 -->
+    <div class="popup-footer">
+      <span class="popup-brand">Lingua</span>
+      <button
+        class="tool-btn"
+        type="button"
+        title="关闭 (Esc)"
+        @click="hidePopup()"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
         >
-          macOS 需要在「系统设置 → 隐私与安全性 → 辅助功能」中授权本应用。
-        </p>
-      </div>
-    </template>
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
   </div>
 </template>
