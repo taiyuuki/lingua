@@ -659,7 +659,29 @@ body {
 }
 
 .popup-dict-text {
-  margin-left: 4px;
+  color: var(--color-text);
+  white-space: pre-line;
+}
+
+/* 长释义折叠态：限 6 行，点击文本或「展开全部」展开 */
+.popup-dict-text-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.popup-dict-toggle {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.popup-dict-toggle:hover {
   color: var(--color-text);
 }
 

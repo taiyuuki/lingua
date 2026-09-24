@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getAppSettings,
@@ -38,6 +38,29 @@ const favoriteWord = reactive({ word: "", language: null as string | null });
 const visionRetryAvailable = ref(false);
 // 识别来源：让用户能区分「识别错了」和「Vision 根本没触发」。
 const ocrSource = ref<OcrSourceInfo | null>(null);
+// 词典长释义（MDX 词库动辄几十行）：默认折叠，点击展开/收起。
+const expandedDefinitions = ref(new Set<number>());
+// 换词条（新查询结果到达）时收起全部。
+watch(state, () => {
+  expandedDefinitions.value = new Set();
+});
+
+function isLongDefinition(text: string): boolean {
+  return text.length > 160 || text.split("\n").length > 5;
+}
+
+function onDefinitionToggle(index: number, text: string): void {
+  if (!isLongDefinition(text)) {
+    return;
+  }
+  const next = new Set(expandedDefinitions.value);
+  if (next.has(index)) {
+    next.delete(index);
+  } else {
+    next.add(index);
+  }
+  expandedDefinitions.value = next;
+}
 let unlisten: (() => void) | null = null;
 let unlistenTheme: (() => void) | null = null;
 let unlistenDelta: (() => void) | null = null;
@@ -456,11 +479,27 @@ function onToolbarMouseDown(event: MouseEvent): void {
               v-for="(definition, index) in state.dictionary.definitions.slice(0, 8)"
               :key="index"
             >
+              <div
+                :class="['popup-dict-text', {
+                  'popup-dict-text-clamped':
+                    isLongDefinition(definition.definition)
+                    && !expandedDefinitions.has(index),
+                }]"
+                @click="onDefinitionToggle(index, definition.definition)"
+              >
+                <span
+                  v-if="definition.partOfSpeech"
+                  class="chip"
+                >{{ definition.partOfSpeech }}</span>
+                {{ definition.definition }}
+              </div>
               <span
-                v-if="definition.partOfSpeech"
-                class="chip"
-              >{{ definition.partOfSpeech }}</span>
-              <span class="popup-dict-text">{{ definition.definition }}</span>
+                v-if="isLongDefinition(definition.definition)"
+                class="popup-dict-toggle"
+                @click="onDefinitionToggle(index, definition.definition)"
+              >
+                {{ expandedDefinitions.has(index) ? "收起 ▴" : "展开全部 ▾" }}
+              </span>
               <ul
                 v-if="definition.examples.length > 0"
                 class="popup-dict-examples"
