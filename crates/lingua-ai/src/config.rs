@@ -43,18 +43,23 @@ pub struct ProviderConfig {
     pub model: Option<String>,
     #[serde(default)]
     pub organization: Option<String>,
-    /// 请求超时秒数，默认 30s。
+    /// 请求超时秒数，默认 60s（深度思考类模型较慢）。
     #[serde(default = "default_timeout_secs")]
     pub timeout_secs: u64,
     #[serde(default)]
     pub capabilities: crate::types::ProviderCapabilities,
+    /// 请求体附带 `{"thinking": {"type": "disabled"}}`，用于关闭
+    /// 智谱 GLM 等默认开启深度思考的模型（翻译类任务通常不需要推理）。
+    /// 仅对支持该参数的服务启用；OpenAI 官方接口会拒绝未知参数。
+    #[serde(default)]
+    pub disable_thinking: bool,
     /// 运行时密钥；**不序列化**。Phase 2 起由 OS 密钥库读写。
     #[serde(skip)]
     pub api_key: Option<String>,
 }
 
 fn default_timeout_secs() -> u64 {
-    30
+    60
 }
 
 impl ProviderConfig {
@@ -68,6 +73,7 @@ impl ProviderConfig {
             organization: None,
             timeout_secs: default_timeout_secs(),
             capabilities: crate::types::ProviderCapabilities::default(),
+            disable_thinking: false,
             api_key: None,
         }
     }
@@ -123,7 +129,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(config.kind, ProviderKind::OpenAiCompatible);
-        assert_eq!(config.timeout(), Duration::from_secs(30));
+        assert_eq!(config.timeout(), Duration::from_secs(60));
         assert!(config.capabilities.chat);
         assert!(!config.capabilities.vision);
     }

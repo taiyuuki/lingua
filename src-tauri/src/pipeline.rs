@@ -218,6 +218,7 @@ mod tests {
             can_chat: true,
             can_translate: true,
             can_vision: false,
+            disable_thinking: false,
             api_key_ref: Some(format!("provider/{id}")),
         }
     }

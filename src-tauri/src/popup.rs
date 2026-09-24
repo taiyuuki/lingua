@@ -61,7 +61,12 @@ pub async fn show(app: &AppHandle, state: PopupState) -> AppResult<()> {
     }
 
     let window = ensure_window(app)?;
-    position_near_cursor(&window);
+    // 只在「隐藏 → 显示」时按光标定位；Loading → Result 的状态切换
+    // 原地刷新，否则翻译完成时弹窗会再次跳到鼠标位置。
+    let already_visible = window.is_visible().map_err(platform_error)?;
+    if !already_visible {
+        position_near_cursor(&window);
+    }
     app.emit(POPUP_EVENT, &state).map_err(platform_error)?;
     window.show().map_err(platform_error)?;
     window.set_focus().map_err(platform_error)?;

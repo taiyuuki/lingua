@@ -66,6 +66,14 @@ struct ChatCompletionsBody<'a> {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    /// 厂商扩展：`{"type": "disabled"}` 关闭深度思考（智谱 GLM 等）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<ThinkingControl>,
+}
+
+#[derive(Serialize)]
+struct ThinkingControl {
+    r#type: &'static str,
 }
 
 /// 响应体：字段做宽容解析（部分兼容服务会省略字段）。
@@ -121,6 +129,11 @@ impl crate::provider::AIProvider for OpenAiCompatibleProvider {
             messages: &request.messages,
             temperature: request.temperature,
             max_tokens: request.max_tokens,
+            thinking: if self.config.disable_thinking {
+                Some(ThinkingControl { r#type: "disabled" })
+            } else {
+                None
+            },
         };
 
         let mut http_request = self.http.post(url).json(&body);
@@ -347,6 +360,47 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.kind(), "timeout");
+    }
+
+    #[test]
+    fn thinking_control_serialized_only_when_enabled() {
+        let mut config = ProviderConfig::new("glm", "GLM");
+        config.base_url = Some("https://open.bigmodel.cn/api/paas/v4".into());
+        config.disable_thinking = true;
+        let provider = OpenAiCompatibleProvider::new(config).unwrap();
+        let body = ChatCompletionsBody {
+            model: None,
+            messages: &[],
+            temperature: None,
+            max_tokens: None,
+            thinking: if provider.config.disable_thinking {
+                Some(ThinkingControl { r#type: "disabled" })
+            } else {
+                None
+            },
+        };
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json["thinking"], serde_json::json!({ "type": "disabled" }));
+
+        let mut plain = ProviderConfig::new("openai", "OpenAI");
+        plain.base_url = Some("https://api.openai.com/v1".into());
+        let provider = OpenAiCompatibleProvider::new(plain).unwrap();
+        let body = ChatCompletionsBody {
+            model: None,
+            messages: &[],
+            temperature: None,
+            max_tokens: None,
+            thinking: if provider.config.disable_thinking {
+                Some(ThinkingControl { r#type: "disabled" })
+            } else {
+                None
+            },
+        };
+        let json = serde_json::to_value(&body).unwrap();
+        assert!(
+            json.get("thinking").is_none(),
+            "未开启时不应发送 thinking 字段"
+        );
     }
 
     #[test]

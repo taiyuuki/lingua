@@ -81,6 +81,8 @@ pub struct ProviderDto {
     pub organization: Option<String>,
     pub timeout_secs: u64,
     #[serde(default)]
+    pub disable_thinking: bool,
+    #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
     pub has_api_key: bool,
@@ -96,6 +98,7 @@ impl ProviderDto {
             model: record.model,
             organization: record.organization,
             timeout_secs: record.timeout_secs,
+            disable_thinking: record.disable_thinking,
             api_key: None,
             has_api_key,
         }
@@ -118,6 +121,7 @@ impl ProviderDto {
             can_chat: true,
             can_translate: true,
             can_vision: false,
+            disable_thinking: self.disable_thinking,
             api_key_ref: Some(SecretRef::provider(self.id.trim()).account),
         }
     }
