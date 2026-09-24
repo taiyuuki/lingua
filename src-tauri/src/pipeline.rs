@@ -74,6 +74,7 @@ async fn run(app: &AppHandle) -> AppResult<()> {
     let app_for_delta = app.clone();
     let result = engine
         .translate_stream(&request, &mut |text: String| {
+            crate::popup::set_streamed(&text);
             if let Err(error) = app_for_delta.emit("popup://delta", text) {
                 tracing::warn!(error = %error, "failed to emit popup delta");
             }

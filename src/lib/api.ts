@@ -215,6 +215,11 @@ export function onPopupDelta(handler: (text: string) => void): Promise<() => voi
   return listen<string>("popup://delta", (event) => handler(event.payload));
 }
 
+/** 流式译文最新累积文本（弹窗挂载晚于流开始时的追平用）。 */
+export async function latestStreamed(): Promise<string> {
+  return invoke<string>("latest_streamed");
+}
+
 export async function performOcrTranslation(
   x: number,
   y: number,

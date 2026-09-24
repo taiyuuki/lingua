@@ -19,12 +19,15 @@ use lingua_core::{
     },
 };
 use lingua_dictionary::DictionaryProvider;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// 翻译 Prompt（编译期内嵌，修改后重新编译即生效）。
 mod prompts {
     pub const TRANSLATE_SYSTEM: &str = include_str!("../prompts/translate/system.md");
     pub const TRANSLATE_USER: &str = include_str!("../prompts/translate/user.md");
+    /// 流式路径专用：纯文本输出（无 JSON 信封），保证增量可读。
+    pub const STREAM_SYSTEM: &str = include_str!("../prompts/translate/stream_system.md");
 }
 
 pub struct TranslationEngine {
@@ -58,9 +61,11 @@ impl TranslationEngine {
         Ok(parse_ai_translation(request, response.content))
     }
 
-    /// 流式翻译：词典命中时一次性回调译文；AI 路径把模型输出里
-    /// `translated_text` 字段已到达的部分实时回调（见
-    /// [`partial_translated_text`]）。返回完整结果（含 alternatives 等）。
+    /// 流式翻译：词典命中时一次性回调译文；AI 路径使用**纯文本输出**
+    /// 的流式 prompt——模型每产出一个增量就实时回调，保证首字延迟后
+    /// 译文连续流动（不做 JSON 信封：那会让增量提取依赖模型字段顺序，
+    /// 模型不配合时整个流期间发不出任何增量，表现为"等完了一波出"）。
+    /// 结束时做轻量清理（去围栏/首尾空白），并把清理后译文补发一次。
     pub async fn translate_stream(
         &self,
         request: &TranslationRequest,
@@ -71,19 +76,41 @@ impl TranslationEngine {
             return Ok(result);
         }
 
-        let (system, user) = self.render_prompt(request);
-        let chat_request = ChatRequest::simple(system, user);
-        let mut streamed = String::new();
-        let response = self
-            .provider
+        let chat_request = ChatRequest::simple(
+            prompts::STREAM_SYSTEM.to_string(),
+            self.user_prompt(request),
+        );
+        let mut accumulated = String::new();
+        self.provider
             .chat_stream(&chat_request, &mut |delta: String| {
-                streamed.push_str(&delta);
-                if let Some(partial) = partial_translated_text(&streamed) {
-                    on_delta(partial);
-                }
+                // Provider 契约：回调参数是到目前为止的完整文本。
+                accumulated = delta.clone();
+                on_delta(delta);
             })
             .await?;
-        Ok(parse_ai_translation(request, response.content))
+
+        let translated_text = Self::sanitize_streamed(&accumulated);
+        if translated_text != accumulated {
+            on_delta(translated_text.clone());
+        }
+        Ok(TranslationResult {
+            source_text: request.text.clone(),
+            translated_text,
+            detected_language: request.source_language.clone(),
+            alternatives: Vec::new(),
+            explanation: None,
+            dictionary: None,
+        })
+    }
+
+    /// 收尾清理：去掉流式输出偶发的代码围栏与首尾空白。
+    fn sanitize_streamed(text: &str) -> String {
+        let trimmed = text.trim();
+        let stripped = trimmed
+            .strip_prefix("```")
+            .and_then(|rest| rest.strip_suffix("```"))
+            .map_or(trimmed, str::trim);
+        stripped.to_string()
     }
 
     /// 词典路由：仅对「单词」生效；任何失败（未命中、释义语言不匹配、
@@ -147,7 +174,18 @@ impl TranslationEngine {
     fn render_prompt(&self, request: &TranslationRequest) -> (String, String) {
         let template =
             PromptTemplate::from_parts(prompts::TRANSLATE_SYSTEM, prompts::TRANSLATE_USER);
-        let vars = vars_from_pairs(&[
+        let vars = self.prompt_vars(request);
+        template.render(&vars)
+    }
+
+    fn user_prompt(&self, request: &TranslationRequest) -> String {
+        let template = PromptTemplate::from_parts("", prompts::TRANSLATE_USER);
+        let (prompt, _) = template.render(&self.prompt_vars(request));
+        prompt
+    }
+
+    fn prompt_vars(&self, request: &TranslationRequest) -> HashMap<String, String> {
+        vars_from_pairs(&[
             ("text", request.text.clone()),
             (
                 "source_language",
@@ -170,57 +208,8 @@ impl TranslationEngine {
                     TranslationMode::Literal => "literal".to_string(),
                 },
             ),
-        ]);
-        template.render(&vars)
+        ])
     }
-}
-
-/// 从流式缓冲中增量提取 `translated_text` 字段已到达的字符串。
-///
-/// 模型输出是 JSON 信封，直接把原始流给用户看会看到 JSON 语法；
-/// 这个解析器在流中定位 `"translated_text": "` 后逐字符解码
-/// （处理 \n / \" / \uXXXX 转义），字符串未闭合时返回已解码部分。
-/// 键未到达 / 还没开始字符串值时返回 `None`（UI 继续显示加载态）。
-pub(crate) fn partial_translated_text(buffer: &str) -> Option<String> {
-    const KEY: &str = "\"translated_text\"";
-    let key_position = buffer.find(KEY)?;
-    let after_key = &buffer[key_position + KEY.len()..];
-    let colon = after_key.find(':')?;
-    let after_colon = after_key[colon + 1..].trim_start();
-    let rest = after_colon.strip_prefix('"')?;
-
-    let mut out = String::new();
-    let mut chars = rest.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => return Some(out), // 字符串正常闭合
-            '\\' => {
-                let Some(escape) = chars.next() else { break }; // 截断的转义
-                match escape {
-                    'n' => out.push('\n'),
-                    't' => out.push('\t'),
-                    'r' => out.push('\r'),
-                    '"' => out.push('"'),
-                    '\\' => out.push('\\'),
-                    '/' => out.push('/'),
-                    'u' => {
-                        let hex: String = chars.by_ref().take(4).collect();
-                        if hex.len() < 4 {
-                            return Some(out); // \u 截断
-                        }
-                        if let Some(decoded) =
-                            u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
-                        {
-                            out.push(decoded);
-                        }
-                    }
-                    other => out.push(other),
-                }
-            }
-            other => out.push(other),
-        }
-    }
-    Some(out) // 未闭合：返回已解码部分（流式中途）
 }
 
 /// 从模型响应解析结构化翻译结果；非 JSON 输出整段作为译文。
@@ -467,41 +456,11 @@ mod tests {
         assert!(result.dictionary.is_none());
     }
 
-    // ---- 流式增量提取 ----
-
-    #[test]
-    fn partial_extractor_streams_decoded_text() {
-        let full = r#"{"translated_text": "你好，\n世界！"}"#;
-        // 逐字符喂入，验证增量解码与最终一致
-        let mut last = None;
-        for end in 1..=full.len() {
-            if full.is_char_boundary(end) {
-                last = partial_translated_text(&full[..end]);
-            }
-        }
-        assert_eq!(last.as_deref(), Some("你好，\n世界！"));
-    }
-
-    #[test]
-    fn partial_extractor_handles_truncated_escape() {
-        let partial = r#"{"translated_text": "hello\志愿团体""#;
-        let _ = partial; // 占位：真实截断场景在下一断言
-        let text = "{\"translated_text\": \"hello\\ Worl";
-        assert_eq!(partial_translated_text(text).as_deref(), Some("hello Worl"));
-    }
-
-    #[test]
-    fn partial_extractor_returns_none_before_value_starts() {
-        assert_eq!(partial_translated_text("{"), None);
-        assert_eq!(partial_translated_text("{\"translated_text\""), None);
-        assert_eq!(partial_translated_text("{\"translated_text\":"), None);
-        assert_eq!(partial_translated_text("{\"explanation\": \"x\"}"), None);
-    }
-
     #[tokio::test]
-    async fn streaming_translation_emits_partial_then_final() {
+    async fn streaming_translation_emits_translated_text() {
+        // 默认 chat_stream 退化为非流式：一次回调完整文本
         let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
-            response: r#"{"translated_text": "短暂的", "detected_language": "en", "alternatives": ["转瞬即逝的"], "explanation": null}"#.into(),
+            response: "  ```\n短暂的\n```  ".into(),
         }));
         let deltas = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let collected = deltas.clone();
@@ -512,10 +471,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.translated_text, "短暂的");
+        assert_eq!(result.alternatives.len(), 0, "流式路径无 JSON 信封");
         let deltas = deltas.lock().unwrap();
-        assert!(!deltas.is_empty());
-        // 最后一次增量应是完整译文
-        assert_eq!(deltas.last().map(String::as_str), Some("短暂的"));
+        assert_eq!(deltas.as_slice(), ["  ```\n短暂的\n```  ", "短暂的"]);
+    }
+
+    #[test]
+    fn sanitize_strips_fences_and_whitespace() {
+        assert_eq!(TranslationEngine::sanitize_streamed("  短暂的  "), "短暂的");
+        assert_eq!(
+            TranslationEngine::sanitize_streamed("```\n短暂的\n```"),
+            "短暂的"
+        );
     }
 
     #[tokio::test]

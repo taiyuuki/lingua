@@ -417,6 +417,12 @@ pub async fn open_popup(app: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
+/// 流式译文最新累积文本（弹窗挂载晚于流开始时的追平用）。
+#[tauri::command]
+pub async fn latest_streamed() -> Result<String, AppError> {
+    Ok(crate::popup::streamed())
+}
+
 /// 切换 Popup 置顶（工具栏图钉），返回切换后的状态。
 #[tauri::command]
 pub async fn toggle_popup_pin(app: tauri::AppHandle) -> Result<bool, AppError> {

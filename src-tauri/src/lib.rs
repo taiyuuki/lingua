@@ -67,6 +67,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::open_popup,
             commands::hide_popup,
             commands::toggle_popup_pin,
+            commands::latest_streamed,
             commands::latest_popup_state,
             commands::selection_permission_status,
             commands::list_providers,

@@ -227,6 +227,7 @@ impl OpenAiCompatibleProvider {
         let mut content = String::new();
         let mut model: Option<String> = None;
         let mut finish_reason: Option<String> = None;
+        let mut delta_count = 0usize;
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(map_request_error)?;
@@ -270,6 +271,7 @@ impl OpenAiCompatibleProvider {
                     {
                         if !delta.is_empty() {
                             content.push_str(delta);
+                            delta_count += 1;
                             on_delta(content.clone());
                         }
                     }
@@ -282,6 +284,12 @@ impl OpenAiCompatibleProvider {
                 }
             }
         }
+
+        tracing::debug!(
+            deltas = delta_count,
+            chars = content.chars().count(),
+            "sse stream consumed"
+        );
 
         Ok(ChatResponse {
             content,

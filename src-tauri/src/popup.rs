@@ -3,6 +3,7 @@
 use crate::platform_error;
 use crate::state::{AppState, PopupState};
 use lingua_core::{AppError, AppResult};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
 
@@ -21,6 +22,24 @@ pub fn popup_pinned() -> bool {
 
 pub fn set_popup_pinned(pinned: bool) {
     POPUP_PINNED.store(pinned, Ordering::Relaxed);
+}
+
+/// 流式译文的最新累积文本。delta 事件之外再留一份权威快照：
+/// 弹窗首次创建时 Vue 监听器尚未挂载，会漏掉早期 delta 事件，
+/// 前端挂载完成后拉一次即可追平。
+static POPUP_STREAMED: Mutex<String> = Mutex::new(String::new());
+
+pub fn set_streamed(text: &str) {
+    *POPUP_STREAMED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = text.to_string();
+}
+
+pub fn streamed() -> String {
+    POPUP_STREAMED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
 }
 
 /// 获取或创建（隐藏的）popup 窗口。
@@ -77,6 +96,11 @@ pub async fn show(app: &AppHandle, state: PopupState) -> AppResult<()> {
             .lock()
             .map_err(|_| AppError::Internal("popup state lock poisoned".into()))?;
         *guard = Some(state.clone());
+        if matches!(state, PopupState::Loading { .. }) {
+            *POPUP_STREAMED
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = String::new();
+        }
     }
 
     let window = ensure_window(app)?;

@@ -5,6 +5,7 @@ import {
   getAppSettings,
   hidePopup,
   latestPopupState,
+  latestStreamed,
   onPopupDelta,
   onPopupState,
   onThemeChanged,
@@ -112,6 +113,8 @@ onMounted(async () => {
   if (snapshot) {
     state.value = snapshot;
   }
+  // 追平：挂载期间可能已漏掉若干 delta 事件
+  streamed.text = await latestStreamed();
 });
 
 onUnmounted(() => {
