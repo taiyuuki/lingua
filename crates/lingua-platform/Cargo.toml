@@ -1,0 +1,19 @@
+[package]
+name = "lingua-platform"
+description = "平台抽象层：SelectionProvider 等与 OS 交互的 trait 边界，具体实现按平台隔离"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+lingua-core = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

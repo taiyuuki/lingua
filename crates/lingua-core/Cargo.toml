@@ -1,0 +1,16 @@
+[package]
+name = "lingua-core"
+description = "Lingua 核心领域模型：错误类型、语言、划词、翻译请求/结果等纯数据契约"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

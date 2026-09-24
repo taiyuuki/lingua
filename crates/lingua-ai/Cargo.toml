@@ -1,0 +1,20 @@
+[package]
+name = "lingua-ai"
+description = "AI Provider 抽象层：统一 AIProvider trait、Provider 配置与请求/响应模型"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+lingua-core = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true
