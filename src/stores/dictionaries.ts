@@ -7,7 +7,6 @@ import {
   type DictionaryInfoDto,
 } from "../lib/api";
 import { describeError } from "../lib/errors";
-import { SUPPORTED_TARGET_LANGUAGES } from "./settings";
 
 /** 词典导入表单。 */
 export interface ImportForm {
@@ -44,7 +43,6 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
   const importing = ref(false);
   const form = reactive<ImportForm>(emptyForm());
 
-  const languageOptions = SUPPORTED_TARGET_LANGUAGES;
   const hasDictionaries = computed(() => dictionaries.value.length > 0);
 
   async function load(): Promise<void> {
@@ -107,7 +105,6 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     importMessage,
     importing,
     form,
-    languageOptions,
     hasDictionaries,
     load,
     openImport,

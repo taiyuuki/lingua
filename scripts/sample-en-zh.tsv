@@ -1,0 +1,10 @@
+# Lingua TSV 词典示例（UTF-8，TAB 分隔；# 开头为注释行）
+# 列：词头 <TAB> 发音 <TAB> 词性 <TAB> 释义 [TAB 例句 [TAB 同义词 [TAB 反义词]]]
+# 例句/同义词/反义词多个值用 " / " 分隔；同一词头多行会合并为一个词条。
+# 后三列可省略（留空 TAB 占位即可）。导入时词头语言选 en、释义语言选 zh。
+ephemeral	/ɪˈfem.ər.əl/	adj	短暂的	an ephemeral moment / ephemeral pleasures	transient	permanent
+ephemeral	/ɪˈfem.ər.əl/	noun	蜉蝣
+serendipity	/ˌser.ənˈdɪp.ə.ti/	noun	意外发现美好事物的运气	a delightful serendipity
+hello	/həˈləʊ/	int	喂；你好（问候、打电话）
+abandon	/əˈbæn.dən/	v	放弃；抛弃	abandon the plan	forsake / desert	preserve / retain
+resilient	/rɪˈzɪl.i.ənt/	adj	有韧性的；能快速恢复的	a resilient economy	tough

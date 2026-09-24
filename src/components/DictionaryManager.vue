@@ -19,6 +19,7 @@ import {
   NText,
 } from "naive-ui";
 import { TSV_FORMAT_HINT, useDictionariesStore } from "../stores/dictionaries";
+import { SUPPORTED_TARGET_LANGUAGES } from "../stores/settings";
 import { pickTsvFilePath } from "../lib/api";
 
 const store = useDictionariesStore();
@@ -29,11 +30,10 @@ const {
   importMessage,
   importing,
   form,
-  languageOptions,
 } = storeToRefs(store);
 
 const languageSelectOptions = computed(() =>
-  languageOptions.value.map((lang) => ({
+  SUPPORTED_TARGET_LANGUAGES.map((lang) => ({
     label: `${lang.label}（${lang.code}）`,
     value: lang.code,
   })),
