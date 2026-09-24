@@ -1,191 +1,257 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted } from "vue";
 import { storeToRefs } from "pinia";
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NEmpty,
+  NForm,
+  NFormItem,
+  NInput,
+  NList,
+  NListItem,
+  NPopconfirm,
+  NSelect,
+  NSpace,
+  NTag,
+  NText,
+} from "naive-ui";
 import { TSV_FORMAT_HINT, useDictionariesStore } from "../stores/dictionaries";
 
 const store = useDictionariesStore();
-const { dictionaries, loadError, importError, importMessage, importing, form, languageOptions } =
-  storeToRefs(store);
+const {
+  dictionaries,
+  loadError,
+  importError,
+  importMessage,
+  importing,
+  form,
+  languageOptions,
+} = storeToRefs(store);
 
-// 两段确认删除（WKWebView 不支持 window.confirm）
-const confirmingId = ref<string | null>(null);
-
-function requestRemove(id: string): void {
-  if (confirmingId.value === id) {
-    confirmingId.value = null;
-    void store.remove(id);
-    return;
-  }
-  confirmingId.value = id;
-  window.setTimeout(() => {
-    if (confirmingId.value === id) {
-      confirmingId.value = null;
-    }
-  }, 3000);
-}
+const languageSelectOptions = computed(() =>
+  languageOptions.value.map((lang) => ({
+    label: `${lang.label}（${lang.code}）`,
+    value: lang.code,
+  })),
+);
 
 onMounted(() => {
   void store.load();
 });
+
 </script>
 
 <template>
-  <section class="card">
-    <div class="card-header-row">
-      <h2>词典</h2>
-      <button
+  <n-card
+    title="词典"
+    size="small"
+  >
+    <template #header-extra>
+      <n-button
         v-if="!form.open"
-        class="btn btn-small"
-        type="button"
+        size="small"
+        type="primary"
         @click="store.openImport()"
       >
         导入词典
-      </button>
-    </div>
-    <p class="muted">
-      本地词典优先：翻译单词时命中词典则直接出结果（快、离线、零成本），未命中才走 AI。
-    </p>
-    <p
+      </n-button>
+    </template>
+
+    <n-text
+      depth="3"
+      style="display: block; margin-bottom: 12px"
+    >
+      本地词典优先：翻译单词时命中词典则直接出结果（快、离线、零成本），未命中才走
+      AI。
+    </n-text>
+    <n-alert
       v-if="loadError"
-      class="error-banner"
+      type="error"
+      :show-icon="true"
+      style="margin-bottom: 12px"
     >
       {{ loadError }}
-    </p>
+    </n-alert>
 
     <!-- 词典列表 -->
-    <ul
+    <n-list
       v-if="dictionaries.length > 0 && !form.open"
-      class="provider-list"
+      :show-divider="true"
     >
-      <li
+      <n-list-item
         v-for="dictionary in dictionaries"
         :key="dictionary.id"
-        class="provider-row"
       >
-        <div class="provider-info">
-          <div class="provider-title">
-            <strong>{{ dictionary.name }}</strong>
-            <code class="provider-id">{{ dictionary.id }}</code>
+        <div class="row">
+          <div class="row-main">
+            <n-space
+              :size="6"
+              align="center"
+              style="margin-bottom: 2px"
+            >
+              <n-text strong>
+                {{ dictionary.name }}
+              </n-text>
+              <n-tag
+                size="small"
+                :bordered="true"
+              >
+                {{ dictionary.id }}
+              </n-tag>
+            </n-space>
+            <n-text
+              depth="3"
+              class="row-detail"
+            >
+              {{ dictionary.sourceLanguage }} → {{ dictionary.glossLanguage }} ·
+              {{ dictionary.entryCount }} 个词条
+            </n-text>
           </div>
-          <p class="provider-detail">
-            {{ dictionary.sourceLanguage }} → {{ dictionary.glossLanguage }} ·
-            {{ dictionary.entryCount }} 个词条
-          </p>
-        </div>
-        <div class="provider-actions">
-          <button
-            class="btn btn-small"
-            :class="confirmingId === dictionary.id ? 'btn-danger-solid' : 'btn-danger'"
-            type="button"
-            @click="requestRemove(dictionary.id)"
+          <n-popconfirm
+            :show-icon="false"
+            @positive-click="store.remove(dictionary.id)"
           >
-            {{ confirmingId === dictionary.id ? "确认删除" : "删除" }}
-          </button>
+            <template #trigger>
+              <n-button
+                size="small"
+                type="error"
+                secondary
+              >
+                删除
+              </n-button>
+            </template>
+            全部词条数据将被移除，确定？
+          </n-popconfirm>
         </div>
-      </li>
-    </ul>
-    <p
+      </n-list-item>
+    </n-list>
+    <n-empty
       v-else-if="!form.open"
-      class="muted"
-    >
-      还没有导入词典。可以把 CC-CEDICT / ECDICT 等公开词典转成 TSV 后导入。
-    </p>
+      description="还没有导入词典。可以把 CC-CEDICT / ECDICT 等公开词典转成 TSV 后导入。"
+      style="margin: 12px 0"
+    />
 
     <!-- 导入表单 -->
-    <form
+    <n-form
       v-if="form.open"
-      class="settings-form"
-      @submit.prevent="store.importTsv()"
+      label-placement="top"
+      size="small"
+      :show-feedback="false"
     >
-      <div class="field-row">
-        <label class="field">
-          <span>ID（英文标识）</span>
-          <input
-            v-model="form.id"
-            type="text"
-            placeholder="my-en-zh"
-            spellcheck="false"
-            required
-          >
-        </label>
-        <label class="field">
-          <span>名称</span>
-          <input
-            v-model="form.name"
-            type="text"
-            placeholder="我的英汉词典"
-            spellcheck="false"
-          >
-        </label>
-      </div>
-
-      <div class="field-row">
-        <label class="field">
-          <span>词头语言</span>
-          <select v-model="form.sourceLanguage">
-            <option
-              v-for="lang in languageOptions"
-              :key="lang.code"
-              :value="lang.code"
-            >
-              {{ lang.label }}（{{ lang.code }}）
-            </option>
-          </select>
-        </label>
-        <label class="field">
-          <span>释义语言</span>
-          <select v-model="form.glossLanguage">
-            <option
-              v-for="lang in languageOptions"
-              :key="lang.code"
-              :value="lang.code"
-            >
-              {{ lang.label }}（{{ lang.code }}）
-            </option>
-          </select>
-        </label>
-      </div>
-
-      <label class="field">
-        <span>TSV 文件路径</span>
-        <input
-          v-model="form.path"
-          type="text"
-          placeholder="/Users/you/dictionary.tsv"
-          spellcheck="false"
-          required
-        >
-      </label>
-      <p class="format-hint">
-        {{ TSV_FORMAT_HINT }}
-      </p>
-
-      <div class="form-footer">
-        <button
-          class="btn"
-          type="submit"
-          :disabled="importing"
-        >
-          {{ importing ? "导入中…" : "开始导入" }}
-        </button>
-        <button
-          class="btn btn-secondary"
-          type="button"
-          @click="store.closeForm()"
-        >
-          取消
-        </button>
-        <span
-          v-if="importMessage"
-          class="save-ok"
-        >{{ importMessage }}</span>
-      </div>
-      <p
-        v-if="importError"
-        class="error-banner"
+      <n-space
+        vertical
+        :size="12"
       >
-        {{ importError }}
-      </p>
-    </form>
-  </section>
+        <n-space :size="12">
+          <n-form-item
+            label="ID（英文标识）"
+            style="flex: 1"
+          >
+            <n-input
+              v-model:value="form.id"
+              placeholder="my-en-zh"
+            />
+          </n-form-item>
+          <n-form-item
+            label="名称"
+            style="flex: 1"
+          >
+            <n-input
+              v-model:value="form.name"
+              placeholder="我的英汉词典"
+            />
+          </n-form-item>
+        </n-space>
+
+        <n-space :size="12">
+          <n-form-item
+            label="词头语言"
+            style="flex: 1"
+          >
+            <n-select
+              v-model:value="form.sourceLanguage"
+              :options="languageSelectOptions"
+            />
+          </n-form-item>
+          <n-form-item
+            label="释义语言"
+            style="flex: 1"
+          >
+            <n-select
+              v-model:value="form.glossLanguage"
+              :options="languageSelectOptions"
+            />
+          </n-form-item>
+        </n-space>
+
+        <n-form-item label="TSV 文件路径">
+          <n-input
+            v-model:value="form.path"
+            placeholder="/Users/you/dictionary.tsv"
+          />
+        </n-form-item>
+        <n-text
+          depth="3"
+          class="format-hint"
+        >
+          {{ TSV_FORMAT_HINT }}
+        </n-text>
+
+        <n-space align="center">
+          <n-button
+            type="primary"
+            :loading="importing"
+            @click="store.importTsv()"
+          >
+            {{ importing ? "导入中…" : "开始导入" }}
+          </n-button>
+          <n-button
+            secondary
+            @click="store.closeForm()"
+          >
+            取消
+          </n-button>
+          <n-text
+            v-if="importMessage"
+            type="success"
+          >
+            {{ importMessage }}
+          </n-text>
+        </n-space>
+        <n-alert
+          v-if="importError"
+          type="error"
+          :show-icon="true"
+        >
+          {{ importError }}
+        </n-alert>
+      </n-space>
+    </n-form>
+  </n-card>
 </template>
+
+<style scoped>
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.row-main {
+  min-width: 0;
+}
+
+.row-detail {
+  font-size: 12.5px;
+}
+
+.format-hint {
+  display: block;
+  font-size: 12px;
+  white-space: pre-line;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+</style>

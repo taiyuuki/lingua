@@ -1,135 +1,87 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
+import { darkTheme, dateZhCN, zhCN, type GlobalThemeOverrides } from "naive-ui";
 import { storeToRefs } from "pinia";
-import { useAppStore } from "./stores/app";
 import { useSettingsStore } from "./stores/settings";
-import ProviderManager from "./components/ProviderManager.vue";
-import DictionaryManager from "./components/DictionaryManager.vue";
-import VocabularyManager from "./components/VocabularyManager.vue";
-import RouterSettings from "./components/RouterSettings.vue";
 
-const appStore = useAppStore();
-const { appInfo, database, errorMessage } = storeToRefs(appStore);
-
-import { screenRecordingStatus, startOcrCapture } from "./lib/api";
-import { ref } from "vue";
-
+// 应用壳：侧边栏导航 + 路由视图；Naive 主题跟随设置（light/dark）。
 const settings = useSettingsStore();
-const { shortcut, permissionGranted } = storeToRefs(settings);
-const screenRecording = ref<boolean | null>(null);
-const ocrError = ref<string | null>(null);
+const { uiTheme } = storeToRefs(settings);
 
-async function refreshScreenRecording(): Promise<void> {
-  try {
-    screenRecording.value = await screenRecordingStatus();
-  } catch {
-    screenRecording.value = null;
-  }
-}
+const naiveTheme = computed(() => (uiTheme.value === "dark" ? darkTheme : null));
+const themeOverrides = computed<GlobalThemeOverrides>(() =>
+  uiTheme.value === "dark"
+    ? {
+        common: {
+          primaryColor: "#7f97ff",
+          primaryColorHover: "#93a5ff",
+          primaryColorPressed: "#93a5ff",
+        },
+      }
+    : {
+        common: {
+          primaryColor: "#4f6ef7",
+          primaryColorHover: "#4059e0",
+          primaryColorPressed: "#4059e0",
+        },
+      },
+);
 
-async function startOcr(): Promise<void> {
-  ocrError.value = null;
-  try {
-    await startOcrCapture();
-  } catch (error) {
-    ocrError.value = String(error);
-  }
-  void refreshScreenRecording();
-}
+const menu = [
+  { path: "/", label: "首页", icon: "M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" },
+  { path: "/providers", label: "服务", icon: "M7 18a4 4 0 1 1 .6-7.9A5.5 5.5 0 0 1 18 9.5a3.5 3.5 0 0 1 0 7H7z" },
+  { path: "/dictionary", label: "词典", icon: "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zm0 14a2 2 0 0 1 2-2h13" },
+  { path: "/vocabulary", label: "生词本", icon: "M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.4l6.1-.8z" },
+  { path: "/settings", label: "设置", icon: "M4 7h16M4 12h16M4 17h16" },
+];
 
 onMounted(() => {
-  void appStore.refresh();
+  // 尽早加载设置：Naive 主题与 data-theme（Popup/OCR 样式令牌）都依赖它。
   void settings.load();
-  void refreshScreenRecording();
 });
 </script>
 
 <template>
-  <main class="page">
-    <header class="page-header">
-      <h1>Lingua</h1>
-      <p class="subtitle">
-        AI 翻译与语言学习助手 · Phase 2：多 Provider + AI Router
-      </p>
-    </header>
-
-    <section class="card">
-      <h2>使用方法</h2>
-      <p class="muted">
-        在任意应用中选中文本，按全局快捷键
-        <code class="kbd">{{ shortcut || "alt+t" }}</code>
-        ，翻译结果会在屏幕中央的 Popup 中显示。按 <code class="kbd">Esc</code>
-        或点击窗口外部可关闭 Popup。
-      </p>
-      <p
-        v-if="permissionGranted === false"
-        class="warn-banner"
-      >
-        缺少辅助功能权限：请在「系统设置 → 隐私与安全性 → 辅助功能」中授权
-        Lingua，否则无法读取选中文本。
-      </p>
-      <dl
-        v-if="appInfo"
-        class="status-grid"
-      >
-        <dt>应用</dt>
-        <dd>{{ appInfo.name }} v{{ appInfo.version }}（{{ appInfo.os }}/{{ appInfo.arch }}）</dd>
-        <dt>数据库</dt>
-        <dd v-if="database">
-          schema v{{ database.schemaVersion }} · {{ database.migrationsTotal }} 个 migration
-        </dd>
-      </dl>
-      <p
-        v-if="errorMessage"
-        class="error-banner"
-      >
-        {{ errorMessage }}
-      </p>
-      <p
-        v-if="screenRecording === false"
-        class="warn-banner"
-      >
-        截图翻译需要「屏幕录制」权限：请在「系统设置 → 隐私与安全性 →
-        屏幕与系统录音」中授权 Lingua，然后重启应用。
-      </p>
-    </section>
-
-    <section class="card">
-      <h2>截图翻译</h2>
-      <p class="muted">
-        OCR 引擎在「路由与快捷键」里配置（默认本机
-        tesseract，也可指向本地 PaddleOCR sidecar）。识别出的文字会走
-        AI 翻译并在 Popup 中显示；截图不落盘。
-      </p>
-      <button
-        class="btn"
-        type="button"
-        @click="startOcr"
-      >
-        截图翻译（框选屏幕区域）
-      </button>
-      <p
-        v-if="ocrError"
-        class="error-banner"
-      >
-        {{ ocrError }}
-      </p>
-    </section>
-
-    <ProviderManager />
-    <DictionaryManager />
-    <VocabularyManager />
-    <RouterSettings />
-
-    <section class="card">
-      <h2>开发</h2>
-      <button
-        class="btn btn-secondary"
-        type="button"
-        @click="appStore.openPopupWindow()"
-      >
-        打开 Popup 窗口
-      </button>
-    </section>
-  </main>
+  <n-config-provider
+    :theme="naiveTheme"
+    :theme-overrides="themeOverrides"
+    :locale="zhCN"
+    :date-locale="dateZhCN"
+    class="app-provider"
+  >
+    <div class="app-shell">
+      <aside class="app-sidebar">
+        <div class="app-brand">
+          Lingua
+        </div>
+        <nav class="app-menu">
+          <RouterLink
+            v-for="item in menu"
+            :key="item.path"
+            :to="item.path"
+            class="menu-item"
+            active-class="active"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path :d="item.icon" />
+            </svg>
+            <span>{{ item.label }}</span>
+          </RouterLink>
+        </nav>
+        <div class="app-sidebar-footer">
+          <span>AI 翻译与语言学习助手</span>
+        </div>
+      </aside>
+      <main class="app-content">
+        <RouterView />
+      </main>
+    </div>
+  </n-config-provider>
 </template>

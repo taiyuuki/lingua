@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { storeToRefs } from "pinia";
-import { useProvidersStore } from "../stores/providers";
 import {
-  SUPPORTED_TARGET_LANGUAGES,
-  useSettingsStore,
-} from "../stores/settings";
+  NAlert,
+  NButton,
+  NCard,
+  NForm,
+  NFormItem,
+  NInput,
+  NSelect,
+  NSpace,
+} from "naive-ui";
+import { useProvidersStore } from "../stores/providers";
+import { SUPPORTED_TARGET_LANGUAGES, useSettingsStore } from "../stores/settings";
 
 const providersStore = useProvidersStore();
 const settingsStore = useSettingsStore();
@@ -25,160 +32,164 @@ const {
 
 const providerOptions = computed(() =>
   providersStore.providers.map((provider) => ({
-    id: provider.id,
     label: `${provider.name}（${provider.id}）`,
+    value: provider.id,
   })),
 );
 
+const themeOptions = [
+  { label: "深色", value: "dark" },
+  { label: "浅色", value: "light" },
+];
+
+const languageOptions = SUPPORTED_TARGET_LANGUAGES.map((lang) => ({
+  label: `${lang.label}（${lang.code}）`,
+  value: lang.code,
+}));
+
+const ocrProviderOptions = [
+  { label: '本机 tesseract CLI', value: 'tesseract' },
+  { label: '本地 OCR HTTP 服务', value: 'http' },
+];
+
 onMounted(() => {
   void settingsStore.load();
+  void providersStore.load();
 });
 </script>
 
 <template>
-  <section class="card">
-    <h2>路由与快捷键</h2>
-    <p class="muted">
+  <n-card
+    title="设置"
+    size="small"
+  >
+    <n-text
+      depth="3"
+      style="display: block; margin-bottom: 12px"
+    >
       不同任务可以走不同 Provider；未单独配置的任务使用默认 Provider。
-    </p>
-    <p
+    </n-text>
+    <n-alert
       v-if="settingsStore.loadError"
-      class="error-banner"
+      type="error"
+      :show-icon="true"
+      style="margin-bottom: 12px"
     >
       {{ settingsStore.loadError }}
-    </p>
+    </n-alert>
 
-    <form
-      class="settings-form"
-      @submit.prevent="settingsStore.save()"
+    <n-form
+      label-placement="top"
+      size="small"
+      :show-feedback="false"
     >
-      <div class="field-row">
-        <label class="field">
-          <span>默认 Provider</span>
-          <select v-model="defaultProviderId">
-            <option value="">
-              未设置
-            </option>
-            <option
-              v-for="option in providerOptions"
-              :key="option.id"
-              :value="option.id"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span>翻译任务 Provider</span>
-          <select v-model="translateProviderId">
-            <option value="">
-              跟随默认
-            </option>
-            <option
-              v-for="option in providerOptions"
-              :key="option.id"
-              :value="option.id"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-      </div>
-
-      <div class="field-row">
-        <label class="field">
-          <span>目标语言</span>
-          <select v-model="targetLanguage">
-            <option
-              v-for="lang in SUPPORTED_TARGET_LANGUAGES"
-              :key="lang.code"
-              :value="lang.code"
-            >
-              {{ lang.label }}（{{ lang.code }}）
-            </option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span>界面主题</span>
-          <select v-model="uiTheme">
-            <option value="dark">
-              深色
-            </option>
-            <option value="light">
-              浅色
-            </option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span>全局快捷键</span>
-          <input
-            v-model="shortcut"
-            type="text"
-            placeholder="alt+t"
-            spellcheck="false"
+      <n-space
+        vertical
+        :size="12"
+      >
+        <n-space :size="12">
+          <n-form-item
+            label="界面主题"
+            style="flex: 1"
           >
-        </label>
+            <n-select
+              v-model:value="uiTheme"
+              :options="themeOptions"
+            />
+          </n-form-item>
+          <n-form-item
+            label="默认 Provider"
+            style="flex: 1"
+          >
+            <n-select
+              v-model:value="defaultProviderId"
+              :options="[{ label: '未设置', value: '' }, ...providerOptions]"
+              clearable
+            />
+          </n-form-item>
+          <n-form-item
+            label="翻译任务 Provider"
+            style="flex: 1"
+          >
+            <n-select
+              v-model:value="translateProviderId"
+              :options="[{ label: '跟随默认', value: '' }, ...providerOptions]"
+              clearable
+            />
+          </n-form-item>
+        </n-space>
 
-        <label class="field">
-          <span>OCR 引擎</span>
-          <select v-model="ocrProvider">
-            <option value="tesseract">
-              本机 tesseract CLI
-            </option>
-            <option value="http">
-              本地 OCR HTTP 服务
-            </option>
-          </select>
-        </label>
-      </div>
+        <n-space :size="12">
+          <n-form-item
+            label="目标语言"
+            style="flex: 1"
+          >
+            <n-select
+              v-model:value="targetLanguage"
+              :options="languageOptions"
+            />
+          </n-form-item>
+          <n-form-item
+            label="全局快捷键"
+            style="flex: 1"
+          >
+            <n-input
+              v-model:value="shortcut"
+              placeholder="alt+t"
+            />
+          </n-form-item>
+        </n-space>
 
-      <label
-        v-if="ocrProvider === 'tesseract'"
-        class="field"
-      >
-        <span>tesseract 路径（brew install tesseract）</span>
-        <input
-          v-model="ocrTesseractPath"
-          type="text"
-          placeholder="tesseract"
-          spellcheck="false"
-        >
-      </label>
-      <label
-        v-else
-        class="field"
-      >
-        <span>OCR 服务地址（PaddleOCR sidecar 契约）</span>
-        <input
-          v-model="ocrHttpUrl"
-          type="text"
-          placeholder="http://127.0.0.1:8433/ocr"
-          spellcheck="false"
-        >
-      </label>
+        <n-space :size="12">
+          <n-form-item
+            label="OCR 引擎"
+            style="flex: 1"
+          >
+            <n-select
+              v-model:value="ocrProvider"
+              :options="ocrProviderOptions"
+            />
+          </n-form-item>
+          <n-form-item
+            :label="ocrProvider === 'http' ? 'OCR 服务地址（PaddleOCR sidecar 契约）' : 'tesseract 路径（brew install tesseract）'"
+            style="flex: 2"
+          >
+            <n-input
+              v-if="ocrProvider === 'tesseract'"
+              v-model:value="ocrTesseractPath"
+              placeholder="tesseract"
+            />
+            <n-input
+              v-else
+              v-model:value="ocrHttpUrl"
+              placeholder="http://127.0.0.1:8433/ocr"
+            />
+          </n-form-item>
+        </n-space>
 
-      <div class="form-footer">
-        <button
-          class="btn"
-          type="submit"
-          :disabled="saving"
+        <n-space align="center">
+          <n-button
+            type="primary"
+            :loading="saving"
+            @click="settingsStore.save()"
+          >
+            保存设置
+          </n-button>
+          <n-text
+            v-if="saveMessage"
+            type="success"
+          >
+            {{ saveMessage }}
+          </n-text>
+        </n-space>
+        <n-alert
+          v-if="saveError"
+          type="error"
+          :show-icon="true"
         >
-          {{ saving ? "保存中…" : "保存设置" }}
-        </button>
-        <span
-          v-if="saveMessage"
-          class="save-ok"
-        >{{ saveMessage }}</span>
-      </div>
-      <p
-        v-if="saveError"
-        class="error-banner"
-      >
-        {{ saveError }}
-      </p>
-    </form>
-  </section>
+          {{ saveError }}
+        </n-alert>
+      </n-space>
+    </n-form>
+  </n-card>
 </template>

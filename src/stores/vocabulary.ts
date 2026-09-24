@@ -25,7 +25,11 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
   const loadError = ref<string | null>(null);
   const editError = ref<string | null>(null);
 
-  const filter = reactive({ search: "", tag: "", mastery: "" as Mastery | "" });
+  const filter = reactive({
+    search: "",
+    tag: "",
+    mastery: "" as Mastery | "",
+  });
 
   const totalCount = computed(() => items.value.length);
 
@@ -36,7 +40,7 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
         search: filter.search.trim() || null,
         tag: filter.tag || null,
         language: null,
-        mastery: (filter.mastery || null) as VocabularyFilterDto["mastery"],
+        mastery: filter.mastery === "" ? null : filter.mastery,
         limit: 0,
       };
       items.value = await listVocabulary(filterDto);
