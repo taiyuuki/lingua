@@ -99,8 +99,9 @@ impl Database {
             let mut insert_definition = tx
                 .prepare(
                     "INSERT INTO dictionary_definitions
-                        (entry_id, pos, part_of_speech, definition, examples, synonyms, antonyms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        (entry_id, pos, part_of_speech, definition, definition_html,
+                         examples, synonyms, antonyms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 )
                 .map_err(db_err)?;
 
@@ -143,6 +144,7 @@ impl Database {
                             index as i64,
                             definition.part_of_speech,
                             definition.definition,
+                            definition.html,
                             strings_to_json_array(&definition.examples),
                             strings_to_json_array(&definition.synonyms),
                             strings_to_json_array(&definition.antonyms),
@@ -250,7 +252,7 @@ impl Database {
         for (entry_id, mut entry) in rows {
             let mut definition_statement = conn
                 .prepare(
-                    "SELECT part_of_speech, definition, examples, synonyms, antonyms
+                    "SELECT part_of_speech, definition, definition_html, examples, synonyms, antonyms
                      FROM dictionary_definitions WHERE entry_id = ?1 ORDER BY pos",
                 )
                 .map_err(db_err)?;
@@ -259,9 +261,10 @@ impl Database {
                     Ok(DictionaryDefinition {
                         part_of_speech: row.get(0)?,
                         definition: row.get(1)?,
-                        examples: json_array_to_strings(&row.get::<_, String>(2)?),
-                        synonyms: json_array_to_strings(&row.get::<_, String>(3)?),
-                        antonyms: json_array_to_strings(&row.get::<_, String>(4)?),
+                        html: row.get(2)?,
+                        examples: json_array_to_strings(&row.get::<_, String>(3)?),
+                        synonyms: json_array_to_strings(&row.get::<_, String>(4)?),
+                        antonyms: json_array_to_strings(&row.get::<_, String>(5)?),
                     })
                 })
                 .map_err(db_err)?
@@ -300,6 +303,7 @@ mod tests {
             definitions: vec![DictionaryDefinition {
                 part_of_speech: Some("noun".into()),
                 definition: definition.into(),
+                html: None,
                 examples: vec![format!("{lemma} example")],
                 synonyms: vec![],
                 antonyms: vec![],

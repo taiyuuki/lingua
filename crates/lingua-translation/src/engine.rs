@@ -372,6 +372,7 @@ mod tests {
             definitions: vec![DictionaryDefinition {
                 part_of_speech: Some("noun".into()),
                 definition: definition.into(),
+                html: None,
                 examples: vec![],
                 synonyms: vec![],
                 antonyms: vec![],

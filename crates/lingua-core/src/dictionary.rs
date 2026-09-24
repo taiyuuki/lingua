@@ -15,6 +15,10 @@ pub struct DictionaryDefinition {
     /// 词性，如 `"noun"` / `"verb"` / `"n."`；原始数据缺失时为 `None`。
     pub part_of_speech: Option<String>,
     pub definition: String,
+    /// 净化后的富文本 HTML（MDX 导入）；TSV 与存量数据为 `None`，
+    /// 前端回落到 `definition` 纯文本。
+    #[serde(default)]
+    pub html: Option<String>,
     #[serde(default)]
     pub examples: Vec<String>,
     #[serde(default)]
@@ -71,6 +75,7 @@ mod tests {
             definitions: vec![DictionaryDefinition {
                 part_of_speech: Some("adj".into()),
                 definition: "短暂的；转瞬即逝的".into(),
+                html: None,
                 examples: vec!["an ephemeral moment".into()],
                 synonyms: vec!["transient".into()],
                 antonyms: vec!["permanent".into()],

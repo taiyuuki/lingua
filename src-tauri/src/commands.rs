@@ -637,6 +637,25 @@ pub async fn import_dictionary_mdx(
                 request.path
             )));
         }
+
+        // 同目录同名 .mdd 资源包（CSS / 图片）：解包到 app_data/mdx/<id>/，
+        // 净化改写过的 mdx-res:// 链接由自定义协议从这里服务。
+        // 失败只告警：词条照常导入，HTML 排版缺资源兜底显示。
+        if let Ok(data_dir) = app.path().app_data_dir() {
+            let mdd_path = std::path::PathBuf::from(&request.path).with_extension("mdd");
+            if mdd_path.is_file() {
+                let resource_dir = data_dir.join("mdx").join(&id);
+                let _ = std::fs::remove_dir_all(&resource_dir);
+                match lingua_dictionary::mdx::extract_mdd_resources(&mdd_path, &resource_dir) {
+                    Ok(count) => {
+                        tracing::info!(dictionary = %id, count, "mdd resources extracted");
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "mdd extraction failed; rendering without resources");
+                    }
+                }
+            }
+        }
         let meta = DictionaryMeta {
             id: id.clone(),
             name: request.name.trim().to_string(),
@@ -681,11 +700,42 @@ pub async fn import_dictionary_mdx(
     .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
+/// 词条内链跳词（`entry://` 链接点击）：按词头查词典。
+/// 不做释义语言过滤（弹窗不知道目标语言），取首条有释义的词条。
+#[tauri::command]
+pub async fn dictionary_lookup(
+    state: tauri::State<'_, AppState>,
+    word: String,
+    language: Option<Language>,
+) -> Result<Option<lingua_core::DictionaryEntry>, AppError> {
+    let word = word.trim().to_string();
+    if word.is_empty() {
+        return Ok(None);
+    }
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let entries = database.lookup_entries(&word, language)?;
+        Ok(entries.into_iter().find(lingua_core::DictionaryEntry::has_definitions))
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
 #[tauri::command]
 pub async fn delete_dictionary(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<(), AppError> {
+    // 词典的 MDD 资源目录随之清理。
+    if let Some(resource_dir) = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|data_dir| data_dir.join("mdx").join(id.trim()))
+    {
+        let _ = std::fs::remove_dir_all(resource_dir);
+    }
     let database = state.database.clone();
     tauri::async_runtime::spawn_blocking(move || {
         database.delete_dictionary(&id)?;

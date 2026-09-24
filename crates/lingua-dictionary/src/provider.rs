@@ -89,6 +89,7 @@ mod tests {
                     definitions: vec![DictionaryDefinition {
                         part_of_speech: Some("noun".into()),
                         definition: "意外发现珍宝的运气".into(),
+                        html: None,
                         examples: vec![],
                         synonyms: vec![],
                         antonyms: vec![],

@@ -71,6 +71,7 @@ pub fn parse_tsv(
         let definition = DictionaryDefinition {
             part_of_speech: (!part_of_speech.is_empty()).then_some(part_of_speech),
             definition,
+            html: None,
             examples,
             synonyms,
             antonyms,

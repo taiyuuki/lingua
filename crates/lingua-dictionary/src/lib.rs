@@ -5,6 +5,7 @@
 //! API、Wiktionary）实现该 trait 后即可接入；原始数据格式由导入层
 //! 转换为 [`DictionaryEntry`](lingua_core::DictionaryEntry) 统一模型。
 
+pub mod html_sanitize;
 pub mod mdx;
 pub mod provider;
 pub mod tsv;

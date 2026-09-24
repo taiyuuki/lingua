@@ -165,10 +165,13 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
    路径输入框保留可手填。MDX（MDict）词库已支持：无加密 v1.2 / v2.0
    与固定密钥加密（Encrypted=2，ripemd128 派生密钥，离线可解）
    （`lingua-dictionary::mdx`，LZO / zlib 解压、GBK / UTF-16 / UTF-8
-   解码、同释义多词头合并为词形变化、`@@@LINK=` 重定向跳过、
-   释义 HTML 转纯文本），大词库分批写库并经
-   `dictionary://import-progress` 事件上报进度；绑定用户注册信息的
-   加密（Encrypted 含 1）与 MDD 资源（CSS / 图片 / 音频）不支持。
+   解码、同释义多词头合并为词形变化、`@@@LINK=` 重定向跳过）。
+   释义双份存储：纯文本列 + 导入期经 ammonia 白名单净化的富文本
+   HTML（migration 0008）；同目录同名 .mdd 资源包（CSS / 图片）
+   解包到 `app_data/mdx/<id>/`，经 `mdx-res://` 自定义协议服务，
+   弹窗富文本渲染、`entry://` 内链跳词（`dictionary_lookup` 命令）。
+   大词库分批写库并经 `dictionary://import-progress` 事件上报进度。
+   绑定用户注册信息的加密（Encrypted 含 1）与 MDD 音频不支持。
    CC-CEDICT / JMdict 原生解析器未做，现阶段用脚本转 TSV
    （格式见导入表单提示）。
 3. 词典路由对「单词与词组」生效（`classify_text` 启发式：句末标点

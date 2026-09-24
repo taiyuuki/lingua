@@ -52,6 +52,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "drop_redundant_entries_index",
         sql: include_str!("../migrations/0007_drop_redundant_entries_index.sql"),
     },
+    Migration {
+        version: 8,
+        name: "definition_html",
+        sql: include_str!("../migrations/0008_definition_html.sql"),
+    },
 ];
 
 /// 当前代码支持的最高 schema 版本。

@@ -29,8 +29,9 @@ pub struct TrayState {
     pub autostart_item: std::sync::Mutex<CheckMenuItem<tauri::Wry>>,
 }
 
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    tauri::Builder::default()
+    pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+        tauri::Builder::default()
+        .register_uri_scheme_protocol("mdx-res", handle_mdx_resource)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
@@ -106,6 +107,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::list_dictionaries,
             commands::import_dictionary_tsv,
             commands::import_dictionary_mdx,
+            commands::dictionary_lookup,
             commands::delete_dictionary,
             commands::list_vocabulary,
             commands::update_vocabulary,
@@ -130,10 +132,87 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// 重新注册全局快捷键（设置变更时也会调用）：
-/// 划词翻译（默认 `alt+t`）与截图翻译（默认 `alt+s`，跟随光标所在
-/// 显示器，多屏截图的主要入口）。两者相同（或截图快捷键非法）时
-/// 截图快捷键让路，只告警不失败——划词是核心路径。
+/// `mdx-res://localhost/<词典id>/<资源路径>` —— MDX 词典富文本的
+/// 资源服务（MDD 解包产物，位于 app_data/mdx/<id>/）。释义 HTML 里
+/// 的 CSS / 图片链接在导入净化时已改写到本协议。
+fn handle_mdx_resource(
+    context: tauri::UriSchemeContext<'_, tauri::Wry>,
+    request: tauri::http::Request<Vec<u8>>,
+) -> tauri::http::Response<Vec<u8>> {
+    let app = context.app_handle();
+    let not_found = || {
+        tauri::http::Response::builder()
+            .status(404)
+            .body(Vec::new())
+            .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+    };
+    // host 固定 localhost；词典 id 与资源路径都在 path 里（已百分号编码）。
+    let raw_path = request.uri().path().trim_start_matches('/');
+    let Some((raw_id, raw_resource)) = raw_path.split_once('/') else {
+        return not_found();
+    };
+    let dictionary_id = percent_decode(raw_id);
+    let resource = percent_decode(raw_resource);
+    let Some(resource) = lingua_dictionary::html_sanitize::normalize_resource_path(&resource)
+    else {
+        return not_found();
+    };
+    let Ok(data_dir) = app.path().app_data_dir() else {
+        return not_found();
+    };
+    let full_path = data_dir.join("mdx").join(dictionary_id).join(&resource);
+    match std::fs::read(&full_path) {
+        Ok(bytes) => tauri::http::Response::builder()
+            .header("Content-Type", resource_content_type(&resource))
+            .header("Cache-Control", "max-age=86400")
+            .body(bytes)
+            .unwrap_or_else(|_| tauri::http::Response::new(Vec::new())),
+        Err(_) => not_found(),
+    }
+}
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(
+                std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or(""),
+                16,
+            ) {
+                out.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn resource_content_type(path: &str) -> &'static str {
+    let extension = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match extension.as_str() {
+        "css" => "text/css",
+        "js" => "text/javascript",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        _ => "application/octet-stream",
+    }
+}
 pub fn register_shortcut_from_settings(
     app: &tauri::AppHandle,
     database: &Database,

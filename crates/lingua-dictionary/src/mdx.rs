@@ -75,7 +75,7 @@ impl MdxEntry {
         self.text.trim_start().to_lowercase().starts_with("@@@link=")
     }
 
-    /// 转换为统一词典模型：HTML 转纯文本，作为单条释义。
+    /// 转换为统一词典模型：纯文本 + 净化后的富文本 HTML 各存一份。
     pub fn to_dictionary_entry(
         &self,
         language: &Language,
@@ -92,6 +92,9 @@ impl MdxEntry {
             definitions: vec![DictionaryDefinition {
                 part_of_speech: None,
                 definition: html_to_plain_text(&self.text),
+                html: Some(crate::html_sanitize::sanitize_definition_html(
+                    &self.text, source,
+                )),
                 examples: Vec::new(),
                 synonyms: Vec::new(),
                 antonyms: Vec::new(),
@@ -349,7 +352,10 @@ fn parse_header(buf: &[u8]) -> AppResult<(Header, usize)> {
         encrypted.parse::<u8>().unwrap_or(0)
     };
 
-    let encoding_name = attr("encoding").unwrap_or_else(|| "UTF-16".to_string());
+    // MDD 资源包常缺 Encoding 属性（空值按 UTF-16 处理，与 mdict-js 一致）。
+    let encoding_name = attr("encoding")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "UTF-16".to_string());
     let encoding_name_normalized = encoding_name.trim().to_ascii_uppercase();
     let (encoding, utf16) = match encoding_name_normalized.as_str() {
         "UTF-8" | "UTF8" => (encoding_rs::UTF_8, false),
@@ -376,6 +382,197 @@ fn parse_header(buf: &[u8]) -> AppResult<(Header, usize)> {
     ))
 }
 
+/// MDict 容器索引：MDX（词头）与 MDD（资源路径）共用的解析结果。
+struct ContainerIndex {
+    header: Header,
+    /// (key 文本, record 偏移)，保持文件内原始顺序。
+    keys: Vec<(String, u64)>,
+    record_blocks: Vec<RecordBlockLayout>,
+    file: Vec<u8>,
+}
+
+/// 解析 MDict 容器（header / key 索引 / record 块布局）。
+fn parse_container(file: Vec<u8>) -> AppResult<ContainerIndex> {
+    let (header, key_section_start) = parse_header(&file)?;
+    // bit 0（值 1）：绑定用户注册信息的加密，离线无法解密。
+    if header.encrypt_bits & 0x01 != 0 {
+        return Err(invalid(
+            "该词典使用用户注册信息加密（Encrypted 含 1），无法离线解密导入",
+        ));
+    }
+    let mut reader = Reader::new(&file[key_section_start..]);
+
+    // ---- key 块区摘要 ----
+    // v2.0 在词条数之后多一个「信息区解压长」，末尾多 4 字节校验和。
+    let num_key_blocks = reader.number(header.v2)? as usize;
+    let num_entries = reader.number(header.v2)? as usize;
+    let key_index_decomp_len = if header.v2 {
+        reader.number(header.v2)? as usize
+    } else {
+        0
+    };
+    let key_index_comp_len = reader.number(header.v2)? as usize;
+    let key_blocks_len = reader.number(header.v2)? as usize;
+    if header.v2 {
+        reader.skip(4)?;
+    }
+    let key_index_raw = reader.take(key_index_comp_len)?;
+    let key_blocks_raw = reader.take(key_blocks_len)?;
+
+    // ---- key 块信息区：逐块(词条数 + 首词 + 尾词 + 压缩长 + 解压长) ----
+    // bit 1（值 2）：信息区 [8..] 用 ripemd128 派生固定密钥加密（离线可解）。
+    let mut key_index_decrypted;
+    let key_index_raw = if header.v2 && header.encrypt_bits & 0x02 != 0 {
+        key_index_decrypted = key_index_raw.to_vec();
+        decrypt_key_block_info(&mut key_index_decrypted);
+        &key_index_decrypted
+    } else {
+        key_index_raw
+    };
+    let key_index =
+        decompress_block(key_index_raw, header.v2, key_index_decomp_len, "key 信息区")?;
+    let mut info = Reader::new(&key_index);
+    let mut blocks_meta = Vec::with_capacity(num_key_blocks.min(65536));
+    for _ in 0..num_key_blocks {
+        let _entries_in_block = info.number(header.v2)?;
+        let _first = info.sized_text(header.v2, header.utf16, header.encoding)?;
+        let _last = info.sized_text(header.v2, header.utf16, header.encoding)?;
+        let comp_len = info.number(header.v2)? as usize;
+        let decomp_len = info.number(header.v2)? as usize;
+        blocks_meta.push((comp_len, decomp_len));
+    }
+
+    // ---- key 块：块内逐词条(记录偏移 + NUL 结尾词头) ----
+    let mut keys: Vec<(String, u64)> = Vec::with_capacity(num_entries.min(1 << 22));
+    let mut block_reader = Reader::new(key_blocks_raw);
+    for &(comp_len, decomp_len) in &blocks_meta {
+        let raw = block_reader.take(comp_len)?;
+        let block = decompress_block(raw, header.v2, decomp_len, "key 块")?;
+        let mut entry_reader = Reader::new(&block);
+        while entry_reader.remaining() > 0 {
+            let record_offset = entry_reader.number(header.v2)?;
+            let key = entry_reader.nul_text(header.utf16, header.encoding)?;
+            let key = key.trim();
+            if key.is_empty() {
+                continue;
+            }
+            keys.push((key.to_string(), record_offset));
+        }
+    }
+    if keys.is_empty() {
+        return Err(invalid("该 MDict 文件没有任何条目"));
+    }
+    if keys.len() != num_entries {
+        tracing::warn!(
+            expected = num_entries,
+            actual = keys.len(),
+            "mdict key count mismatch (continuing)"
+        );
+    }
+
+    // ---- record 块区 ----
+    let num_record_blocks = reader.number(header.v2)? as usize;
+    let _num_record_entries = reader.number(header.v2)?;
+    let record_index_len = reader.number(header.v2)? as usize;
+    let record_blocks_len = reader.number(header.v2)? as usize;
+    let record_index_raw = reader.take(record_index_len)?;
+    let mut info = Reader::new(record_index_raw);
+    let record_data_start = key_section_start + reader.pos;
+    let mut record_blocks = Vec::with_capacity(num_record_blocks.min(65536));
+    let mut file_offset = record_data_start;
+    let mut stream_offset: u64 = 0;
+    for _ in 0..num_record_blocks {
+        let comp_len = info.number(header.v2)? as usize;
+        let decomp_len = info.number(header.v2)? as usize;
+        record_blocks.push(RecordBlockLayout {
+            file_offset,
+            comp_len,
+            stream_offset,
+            decomp_len,
+        });
+        file_offset += comp_len;
+        stream_offset += decomp_len as u64;
+    }
+    if record_data_start + record_blocks_len > file.len() {
+        // 个别引擎声明的 record 数据区比文件多几个字节，只告警不失败。
+        tracing::warn!(
+            declared = record_blocks_len,
+            "mdict record data size exceeds file (continuing)"
+        );
+    }
+
+    Ok(ContainerIndex {
+        header,
+        keys,
+        record_blocks,
+        file,
+    })
+}
+
+/// 解包 MDD 资源包（与 .mdx 同容器，key 是资源路径）到 `out_dir`。
+/// 返回写出的文件数；同偏移的别名 key 只写一次。
+pub fn extract_mdd_resources(mdd_path: &Path, out_dir: &Path) -> AppResult<usize> {
+    let file = std::fs::read(mdd_path)
+        .map_err(|error| invalid(format!("无法读取 `{}`：{error}", mdd_path.display())))?;
+    let container = parse_container(file)?;
+
+    // 按偏移排序后逐 record 块顺序解包（同偏移别名去重）。
+    let mut keys = container.keys;
+    keys.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut unique: Vec<(String, u64)> = Vec::with_capacity(keys.len());
+    for (path, offset) in keys {
+        if unique.last().is_none_or(|&(_, prev)| prev != offset) {
+            unique.push((path, offset));
+        }
+    }
+
+    let file = &container.file;
+    let mut written = 0usize;
+    let mut index = 0usize;
+    for block in &container.record_blocks {
+        if index >= unique.len() {
+            break;
+        }
+        let Some(raw) = file.get(block.file_offset..block.file_offset + block.comp_len) else {
+            break;
+        };
+        let data = decompress_block(raw, container.header.v2, block.decomp_len, "record 块")?;
+        let block_end = block.stream_offset + data.len() as u64;
+
+        while index < unique.len() {
+            let (path, offset) = &unique[index];
+            if *offset < block.stream_offset {
+                // 指向已扫过区域的悬空 key：跳过。
+                index += 1;
+                continue;
+            }
+            if *offset >= block_end {
+                break;
+            }
+            let Some(relative) = crate::html_sanitize::normalize_resource_path(path) else {
+                index += 1;
+                continue;
+            };
+            let start = (offset - block.stream_offset) as usize;
+            let end = unique
+                .get(index + 1)
+                .map(|&(_, next)| (next - block.stream_offset) as usize)
+                .filter(|end| *end <= data.len())
+                .unwrap_or(data.len());
+            let destination = out_dir.join(&relative);
+            if let Some(parent) = destination.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| invalid(format!("无法创建资源目录：{error}")))?;
+            }
+            std::fs::write(&destination, &data[start..end.max(start)])
+                .map_err(|error| invalid(format!("无法写出资源 `{relative}`：{error}")))?;
+            written += 1;
+            index += 1;
+        }
+    }
+    Ok(written)
+}
+
 impl MdxFile {
     /// 打开并解析 MDX 文件：读入全文件、解析 header 与 key 索引。
     /// record 块留给 [`MdxFile::entries`] 流式解压。
@@ -386,113 +583,13 @@ impl MdxFile {
     }
 
     fn parse(file: Vec<u8>) -> AppResult<Self> {
-        let (header, key_section_start) = parse_header(&file)?;
-        // bit 0（值 1）：绑定用户注册信息的加密，离线无法解密。
-        if header.encrypt_bits & 0x01 != 0 {
-            return Err(invalid(
-                "该词典使用用户注册信息加密（Encrypted 含 1），无法离线解密导入",
-            ));
-        }
-        let mut reader = Reader::new(&file[key_section_start..]);
-
-        // ---- key 块区摘要 ----
-        // v2.0 在词条数之后多一个「信息区解压长」，末尾多 4 字节校验和。
-        let num_key_blocks = reader.number(header.v2)? as usize;
-        let num_entries = reader.number(header.v2)? as usize;
-        let key_index_decomp_len = if header.v2 {
-            reader.number(header.v2)? as usize
-        } else {
-            0
-        };
-        let key_index_comp_len = reader.number(header.v2)? as usize;
-        let key_blocks_len = reader.number(header.v2)? as usize;
-        if header.v2 {
-            reader.skip(4)?;
-        }
-        let key_index_raw = reader.take(key_index_comp_len)?;
-        let key_blocks_raw = reader.take(key_blocks_len)?;
-
-        // ---- key 块信息区：逐块(词条数 + 首词 + 尾词 + 压缩长 + 解压长) ----
-        // bit 1（值 2）：信息区 [8..] 用 ripemd128 派生固定密钥加密（离线可解）。
-        let mut key_index_decrypted;
-        let key_index_raw = if header.v2 && header.encrypt_bits & 0x02 != 0 {
-            key_index_decrypted = key_index_raw.to_vec();
-            decrypt_key_block_info(&mut key_index_decrypted);
-            &key_index_decrypted
-        } else {
-            key_index_raw
-        };
-        let key_index =
-            decompress_block(key_index_raw, header.v2, key_index_decomp_len, "key 信息区")?;
-        let mut info = Reader::new(&key_index);
-        let mut blocks_meta = Vec::with_capacity(num_key_blocks.min(65536));
-        for _ in 0..num_key_blocks {
-            let _entries_in_block = info.number(header.v2)?;
-            let _first = info.sized_text(header.v2, header.utf16, header.encoding)?;
-            let _last = info.sized_text(header.v2, header.utf16, header.encoding)?;
-            let comp_len = info.number(header.v2)? as usize;
-            let decomp_len = info.number(header.v2)? as usize;
-            blocks_meta.push((comp_len, decomp_len));
-        }
-
-        // ---- key 块：块内逐词条(记录偏移 + NUL 结尾词头) ----
-        let mut keys: Vec<(String, u64)> = Vec::with_capacity(num_entries.min(1 << 22));
-        let mut block_reader = Reader::new(key_blocks_raw);
-        for &(comp_len, decomp_len) in &blocks_meta {
-            let raw = block_reader.take(comp_len)?;
-            let block = decompress_block(raw, header.v2, decomp_len, "key 块")?;
-            let mut entry_reader = Reader::new(&block);
-            while entry_reader.remaining() > 0 {
-                let record_offset = entry_reader.number(header.v2)?;
-                let lemma = entry_reader.nul_text(header.utf16, header.encoding)?;
-                let lemma = lemma.trim();
-                if lemma.is_empty() {
-                    continue;
-                }
-                keys.push((lemma.to_string(), record_offset));
-            }
-        }
-        if keys.is_empty() {
-            return Err(invalid("该 MDX 文件没有任何词条"));
-        }
-        if keys.len() != num_entries {
-            tracing::warn!(
-                expected = num_entries,
-                actual = keys.len(),
-                "mdx key count mismatch (continuing)"
-            );
-        }
-
-        // ---- record 块区 ----
-        let num_record_blocks = reader.number(header.v2)? as usize;
-        let _num_record_entries = reader.number(header.v2)?;
-        let record_index_len = reader.number(header.v2)? as usize;
-        let record_blocks_len = reader.number(header.v2)? as usize;
-        let record_index_raw = reader.take(record_index_len)?;
-        let mut info = Reader::new(record_index_raw);
-        let record_data_start = key_section_start + reader.pos;
-        let mut record_blocks = Vec::with_capacity(num_record_blocks.min(65536));
-        let mut file_offset = record_data_start;
-        let mut stream_offset: u64 = 0;
-        for _ in 0..num_record_blocks {
-            let comp_len = info.number(header.v2)? as usize;
-            let decomp_len = info.number(header.v2)? as usize;
-            record_blocks.push(RecordBlockLayout {
-                file_offset,
-                comp_len,
-                stream_offset,
-                decomp_len,
-            });
-            file_offset += comp_len;
-            stream_offset += decomp_len as u64;
-        }
-        if record_data_start + record_blocks_len > file.len() {
-            // 个别引擎声明的 record 数据区比文件多几个字节，只告警不失败。
-            tracing::warn!(
-                declared = record_blocks_len,
-                "mdx record data size exceeds file (continuing)"
-            );
-        }
+        let container = parse_container(file)?;
+        let ContainerIndex {
+            header,
+            mut keys,
+            record_blocks,
+            file,
+        } = container;
 
         // 同一 record 偏移的多个词头合并：首词头作 lemma，其余作词形变化。
         keys.sort_by(|a, b| a.1.cmp(&b.1));
@@ -930,6 +1027,79 @@ mod tests {
     }
 
     #[test]
+    fn extracts_mdd_resources_to_disk() {
+        // v1.2 / UTF-8 容器，key 是资源路径：css/a.css + img/b.png。
+        let css = b"body{color:red}".to_vec();
+        let png = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&css);
+        stream.extend_from_slice(&png);
+        let record_block = compressed_block(&stream);
+        let mut record_info = Vec::new();
+        record_info.extend_from_slice(&u32be(record_block.len() as u64));
+        record_info.extend_from_slice(&u32be(stream.len() as u64));
+
+        let mut key_block_data = Vec::new();
+        for (path, offset) in [
+            ("\\css\\a.css", 0u64),
+            ("/img/b.png", css.len() as u64),
+        ] {
+            key_block_data.extend_from_slice(&u32be(offset));
+            key_block_data.extend_from_slice(&utf8_nul_text(path));
+        }
+        let key_block = compressed_block(&key_block_data);
+
+        let mut key_index = Vec::new();
+        key_index.extend_from_slice(&u32be(2)); // 块内条目数
+        key_index.push(b"\\css\\a.css".len() as u8);
+        key_index.extend_from_slice(b"\\css\\a.css");
+        key_index.push(b"/img/b.png".len() as u8);
+        key_index.extend_from_slice(b"/img/b.png");
+        key_index.extend_from_slice(&u32be(key_block.len() as u64));
+        key_index.extend_from_slice(&u32be(key_block_data.len() as u64));
+
+        let mut file = Vec::new();
+        let header_text = "<Library_Data GeneratedByEngineVersion=\"1.2\" \
+             RequiredFormatVersion=\"1.2\" Encrypted=\"No\" Encoding=\"UTF-8\" />";
+        let mut header_bytes = Vec::new();
+        for unit in header_text.encode_utf16() {
+            header_bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        file.extend_from_slice(&(header_bytes.len() as u32).to_be_bytes());
+        file.extend_from_slice(&header_bytes);
+        file.extend_from_slice(&[0, 0, 0, 0]);
+
+        file.extend_from_slice(&u32be(1));
+        file.extend_from_slice(&u32be(2));
+        file.extend_from_slice(&u32be(key_index.len() as u64));
+        file.extend_from_slice(&u32be(key_block.len() as u64));
+        file.extend_from_slice(&key_index);
+        file.extend_from_slice(&key_block);
+
+        file.extend_from_slice(&u32be(1));
+        file.extend_from_slice(&u32be(2));
+        file.extend_from_slice(&u32be(record_info.len() as u64));
+        file.extend_from_slice(&u32be(record_block.len() as u64));
+        file.extend_from_slice(&record_info);
+        file.extend_from_slice(&record_block);
+
+        let dir = std::env::temp_dir().join("lingua-mdd-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mdd_path = dir.join("test.mdd");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&mdd_path, file).unwrap();
+        let out_dir = dir.join("resources");
+
+        let written = extract_mdd_resources(&mdd_path, &out_dir).unwrap();
+        assert_eq!(written, 2);
+        assert_eq!(
+            std::fs::read(out_dir.join("css/a.css")).unwrap(),
+            b"body{color:red}".to_vec()
+        );
+        assert_eq!(std::fs::read(out_dir.join("img/b.png")).unwrap(), png);
+    }
+
+    #[test]
     fn parses_minimal_mdx_and_merges_alias_keys() {
         let dict = MdxFile::parse(minimal_mdx()).unwrap();
         assert_eq!(dict.title.as_deref(), Some("Test"));
@@ -1116,12 +1286,14 @@ mod tests {
             .collect();
         assert_eq!(database.import_dictionary(&meta, &entries).unwrap(), 3);
 
-        // 大小写不敏感命中，别名保留在词形变化里。
+        // 大小写不敏感命中，别名保留在词形变化里，富文本 HTML 随行。
         let hits = database.lookup_entries("WORLD", Some(Language::En)).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].lemma, "world");
         assert_eq!(hits[0].source, "test-mdx");
         assert_eq!(hits[0].inflections, vec!["world2"]);
+        let html = hits[0].definitions[0].html.as_deref().unwrap();
+        assert!(html.contains("<p>world &amp; <font"), "{html}");
     }
 
     #[test]

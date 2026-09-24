@@ -8,6 +8,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+ammonia = { workspace = true }
 lingua-core = { workspace = true }
 lingua-database = { workspace = true }
 async-trait = { workspace = true }

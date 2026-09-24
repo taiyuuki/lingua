@@ -32,6 +32,7 @@ lingua-ocr = { path = "crates/lingua-ocr" }
 
 image = { version = "0.25", default-features = false, features = ["png"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+ammonia = "4"
 encoding_rs = "0.8"
 flate2 = "1"
 lzokay = { version = "2", default-features = false, features = ["decompress"] }

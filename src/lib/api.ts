@@ -84,6 +84,8 @@ export interface TestProviderResult {
 export interface DictionaryDefinitionDto {
   partOfSpeech: string | null;
   definition: string;
+  /** 导入期净化过的富文本 HTML（MDX 词库）；TSV 与旧数据为 null。 */
+  html: string | null;
   examples: string[];
   synonyms: string[];
   antonyms: string[];
@@ -351,6 +353,17 @@ export function onDictionaryImportProgress(
 
 export async function deleteDictionary(id: string): Promise<void> {
   await invoke("delete_dictionary", { id });
+}
+
+/** 词条内链跳词：按词头查词典（entry:// 链接点击用）；未命中返回 null。 */
+export async function dictionaryLookup(
+  word: string,
+  language?: string | null,
+): Promise<DictionaryEntryDto | null> {
+  return invoke<DictionaryEntryDto | null>("dictionary_lookup", {
+    word,
+    language: language ?? null,
+  });
 }
 
 export async function listVocabulary(

@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getAppSettings,
+  dictionaryLookup,
   hidePopup,
   isWord,
   latestPopupState,
@@ -60,6 +61,36 @@ function onDefinitionToggle(index: number, text: string): void {
     next.add(index);
   }
   expandedDefinitions.value = next;
+}
+
+/** 富文本区点击：词条内链（entry://）跳词，其余按折叠切换处理。 */
+function onRichClick(event: MouseEvent, index: number, text: string): void {
+  const anchor = (event.target as HTMLElement | null)?.closest?.(
+    'a[href^="entry://"]',
+  ) as HTMLAnchorElement | null;
+  if (anchor) {
+    event.preventDefault();
+    const word = (anchor.getAttribute("href") ?? "").replace(/^entry:\/\//, "");
+    void jumpToEntry(decodeURIComponent(word).trim());
+    return;
+  }
+  onDefinitionToggle(index, text);
+}
+
+/** 内链跳词：命中则局部替换当前词条，未命中/失败静默保留。 */
+async function jumpToEntry(word: string): Promise<void> {
+  if (!word || state.value.status !== "result") {
+    return;
+  }
+  try {
+    const entry = await dictionaryLookup(word);
+    if (entry && state.value.status === "result") {
+      state.value.dictionary = entry;
+      expandedDefinitions.value = new Set();
+    }
+  } catch {
+    // 静默：跳词失败不影响当前展示
+  }
 }
 let unlisten: (() => void) | null = null;
 let unlistenTheme: (() => void) | null = null;
@@ -479,11 +510,27 @@ function onToolbarMouseDown(event: MouseEvent): void {
               v-for="(definition, index) in state.dictionary.definitions.slice(0, 8)"
               :key="index"
             >
+              <!-- 富文本（导入期已净化）与纯文本两套渲染，折叠交互共用 -->
+              <!-- 内容在导入期经 ammonia 白名单净化，渲染可信 -->
+              <!-- eslint-disable-next-line vue/no-v-html -->
               <div
-                :class="['popup-dict-text', {
-                  'popup-dict-text-clamped':
+                v-if="definition.html"
+                :class="['popup-dict-rich', {
+                  'popup-dict-clamped':
                     isLongDefinition(definition.definition)
                     && !expandedDefinitions.has(index),
+                  'popup-dict-expanded': expandedDefinitions.has(index),
+                }]"
+                @click="onRichClick($event, index, definition.definition)"
+                v-html="definition.html"
+              />
+              <div
+                v-else
+                :class="['popup-dict-text', {
+                  'popup-dict-clamped':
+                    isLongDefinition(definition.definition)
+                    && !expandedDefinitions.has(index),
+                  'popup-dict-expanded': expandedDefinitions.has(index),
                 }]"
                 @click="onDefinitionToggle(index, definition.definition)"
               >
