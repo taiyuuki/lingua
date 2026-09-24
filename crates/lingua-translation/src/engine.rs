@@ -113,11 +113,13 @@ impl TranslationEngine {
         stripped.to_string()
     }
 
-    /// 词典路由：仅对「单词」生效；任何失败（未命中、释义语言不匹配、
-    /// 查询出错）都静默回退 AI，不阻断翻译。
+    /// 词典路由：对「单词」与「词组」生效（词典里也有多词词头，
+    /// 如 "15 minutes of fame"；索引查询便宜，未命中静默回退 AI），
+    /// 整句仍直接走 AI；任何失败（未命中、释义语言不匹配、查询出错）
+    /// 都静默回退 AI，不阻断翻译。
     async fn try_dictionary(&self, request: &TranslationRequest) -> Option<TranslationResult> {
         let dictionary = self.dictionary.as_ref()?;
-        if classify_text(&request.text) != TextKind::Word {
+        if classify_text(&request.text) == TextKind::Sentence {
             return None;
         }
         let word = request.text.trim();
@@ -449,9 +451,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn phrase_uses_dictionary_without_ai() {
+        // 多词词组也查词典（词库里有 "15 minutes of fame" 这类词头）。
+        let engine = engine_with_dict(
+            "should-not-be-called",
+            vec![dict_entry("an ephemeral moment", "朝露之瞬")],
+        )
+        .await;
+        let result = engine.translate(&request("an ephemeral moment")).await.unwrap();
+        assert_eq!(result.translated_text, "朝露之瞬");
+        assert_eq!(result.dictionary.as_ref().unwrap().lemma, "an ephemeral moment");
+    }
+
+    #[tokio::test]
+    async fn long_cjk_phrase_uses_dictionary() {
+        // CJK 超 4 字判为词组，同样走词典（此前只有 ≤4 字的「单词」走）。
+        let engine = engine_with_dict("should-not-be-called", vec![dict_entry(
+            "人工智能大模型",
+            "大规格 AI 模型",
+        )])
+        .await;
+        let result = engine.translate(&request("人工智能大模型")).await.unwrap();
+        assert_eq!(result.translated_text, "大规格 AI 模型");
+    }
+
+    #[tokio::test]
     async fn sentence_skips_dictionary_and_uses_ai() {
+        // 句末标点判为整句：直接走 AI，不查词典。
         let engine = engine_with_dict("从 AI 来的", vec![dict_entry("hello", "你好")]).await;
-        let request = TranslationRequest::new("hello world foo", Language::Zh);
+        let request = TranslationRequest::new("hello world.", Language::Zh);
         let result = engine.translate(&request).await.unwrap();
         assert_eq!(result.translated_text, "从 AI 来的");
         assert!(result.dictionary.is_none());
