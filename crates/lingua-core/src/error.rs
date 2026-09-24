@@ -29,6 +29,10 @@ pub enum AppError {
     Platform(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// 触发划词时没有任何选中文本。这是高频正常情况，
+    /// 单列变体让前端给出温和提示而不是报错。
+    #[error("no text is selected")]
+    NoSelection,
     #[error("operation timed out: {0}")]
     Timeout(String),
     #[error("internal error: {0}")]
@@ -47,6 +51,7 @@ impl AppError {
             AppError::Permission(_) => "permission",
             AppError::Platform(_) => "platform",
             AppError::InvalidInput(_) => "invalid_input",
+            AppError::NoSelection => "no_selection",
             AppError::Timeout(_) => "timeout",
             AppError::Internal(_) => "internal",
         }

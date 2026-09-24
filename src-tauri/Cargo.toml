@@ -20,11 +20,16 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+lingua-ai = { workspace = true }
 lingua-core = { workspace = true }
 lingua-database = { workspace = true }
+lingua-platform = { workspace = true }
+lingua-secrets = { workspace = true }
+lingua-translation = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { version = "2", features = [] }
+tauri-plugin-global-shortcut = "2.3.2"
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

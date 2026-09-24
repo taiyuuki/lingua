@@ -17,6 +17,7 @@ const KIND_LABELS: Record<string, string> = {
   permission: "缺少系统权限",
   platform: "平台相关错误",
   invalid_input: "输入不合法",
+  no_selection: "未检测到选中文本",
   timeout: "请求超时",
   internal: "内部错误",
 };

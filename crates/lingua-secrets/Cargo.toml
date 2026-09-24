@@ -1,0 +1,15 @@
+[package]
+name = "lingua-secrets"
+description = "OS 密钥库抽象：API Key 等机密存取（macOS Keychain / Windows Credential Manager / Linux Secret Service）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+lingua-core = { workspace = true }
+keyring = "4"
+
+[lints]
+workspace = true

@@ -6,6 +6,8 @@ members = [
     "crates/lingua-platform",
     "crates/lingua-ai",
     "crates/lingua-database",
+    "crates/lingua-secrets",
+    "crates/lingua-translation",
 ]
 
 [workspace.package]
@@ -21,6 +23,8 @@ lingua-core = { path = "crates/lingua-core" }
 lingua-platform = { path = "crates/lingua-platform" }
 lingua-ai = { path = "crates/lingua-ai" }
 lingua-database = { path = "crates/lingua-database" }
+lingua-secrets = { path = "crates/lingua-secrets" }
+lingua-translation = { path = "crates/lingua-translation" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

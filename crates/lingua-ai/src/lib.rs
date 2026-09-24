@@ -6,10 +6,12 @@
 //! OpenAI-compatible HTTP 实现在 Phase 1 落地。
 
 pub mod config;
+pub mod openai;
 pub mod provider;
 pub mod types;
 
 pub use config::{ProviderConfig, ProviderKind};
+pub use openai::OpenAiCompatibleProvider;
 pub use provider::AIProvider;
 pub use types::{
     ChatMessage, ChatRequest, ChatResponse, ChatRole, ProviderCapabilities, VisionRequest,

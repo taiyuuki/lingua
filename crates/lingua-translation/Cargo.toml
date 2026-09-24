@@ -1,0 +1,21 @@
+[package]
+name = "lingua-translation"
+description = "Translation Engine：按请求路由 Dictionary / AI / Vision，Prompt 模板与代码分离"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+lingua-core = { workspace = true }
+lingua-ai = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+async-trait.workspace = true
+tokio = { workspace = true }
+
+[lints]
+workspace = true

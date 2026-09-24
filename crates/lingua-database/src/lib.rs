@@ -8,6 +8,7 @@
 //! * 业务数据不允许散落在 JSON 文件里；settings 表是唯一的 KV 例外。
 
 pub mod migrations;
+pub mod providers;
 pub mod settings;
 
 pub use migrations::{MIGRATIONS, Migration, latest_version};
@@ -145,7 +146,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let first = db.migrate().unwrap();
         assert_eq!(first.current_version, latest_version());
-        assert_eq!(first.applied.len(), 1);
+        assert_eq!(first.applied.len(), MIGRATIONS.len());
 
         let second = db.migrate().unwrap();
         assert!(second.applied.is_empty());
