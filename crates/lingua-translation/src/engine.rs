@@ -180,7 +180,8 @@ impl TranslationEngine {
 
     fn user_prompt(&self, request: &TranslationRequest) -> String {
         let template = PromptTemplate::from_parts("", prompts::TRANSLATE_USER);
-        let (prompt, _) = template.render(&self.prompt_vars(request));
+        // render 返回 (system, user)——这里只要 user（含原文与目标语言）。
+        let (_, prompt) = template.render(&self.prompt_vars(request));
         prompt
     }
 
@@ -518,5 +519,20 @@ mod tests {
         assert!(system.contains("JSON"));
         assert!(user.contains("hello"));
         assert!(user.contains("zh"));
+    }
+
+    #[test]
+    fn stream_user_prompt_must_contain_source_text() {
+        // 回归：曾误取 render 返回的 system 位（空串），导致模型收到空输入。
+        let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
+            response: "{}".into(),
+        }));
+        let user = engine.user_prompt(&request("rules against source files"));
+        assert!(
+            user.contains("rules against source files"),
+            "user prompt 丢了原文: {user}"
+        );
+        assert!(user.contains("zh"));
+        assert!(!engine.render_prompt(&request("x")).0.is_empty());
     }
 }
