@@ -162,8 +162,15 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
    SQLite 实现、TSV 导入器（行级容错、同 lemma 合并、单事务增量导入）、
    Popup 词典视图（音标 / 词性 / 释义 / 例句）。
 2. 导入已接文件选择器（`tauri-plugin-dialog`，随打包阶段引入）；
-   路径输入框保留可手填。CC-CEDICT / JMdict 原生解析器未做，
-   现阶段用脚本转 TSV（格式见导入表单提示）。
+   路径输入框保留可手填。MDX（MDict）词库已支持：无加密 v1.2 / v2.0
+   与固定密钥加密（Encrypted=2，ripemd128 派生密钥，离线可解）
+   （`lingua-dictionary::mdx`，LZO / zlib 解压、GBK / UTF-16 / UTF-8
+   解码、同释义多词头合并为词形变化、`@@@LINK=` 重定向跳过、
+   释义 HTML 转纯文本），大词库分批写库并经
+   `dictionary://import-progress` 事件上报进度；绑定用户注册信息的
+   加密（Encrypted 含 1）与 MDD 资源（CSS / 图片 / 音频）不支持。
+   CC-CEDICT / JMdict 原生解析器未做，现阶段用脚本转 TSV
+   （格式见导入表单提示）。
 3. 词典路由只对「单词」生效（`classify_text` 启发式：CJK ≤4 字、
    其它 ≤1 词）；生词/词组的词典短路是后续优化。
 4. 释义语言必须等于目标语言才采用词典结果，跨多目标语言需导入

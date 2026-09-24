@@ -208,13 +208,13 @@ export function onOcrBackgroundUpdated(handler: () => void): Promise<() => void>
   return listen("ocr://background-updated", () => handler());
 }
 
-/** 打开文件选择框选一个 TSV 词典；取消返回 null。 */
-export async function pickTsvFilePath(): Promise<string | null> {
+/** 打开文件选择框选一个词典文件（TSV / MDX）；取消返回 null。 */
+export async function pickDictionaryFilePath(): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const selection = await open({
     multiple: false,
     directory: false,
-    filters: [{ name: "TSV 词典", extensions: ["tsv", "txt"] }],
+    filters: [{ name: "词典文件", extensions: ["tsv", "txt", "mdx"] }],
   });
   return typeof selection === "string" ? selection : null;
 }
@@ -323,6 +323,30 @@ export async function importDictionaryTsv(
   request: ImportDictionaryRequestDto,
 ): Promise<ImportDictionaryResultDto> {
   return invoke<ImportDictionaryResultDto>("import_dictionary_tsv", { request });
+}
+
+export async function importDictionaryMdx(
+  request: ImportDictionaryRequestDto,
+): Promise<ImportDictionaryResultDto> {
+  return invoke<ImportDictionaryResultDto>("import_dictionary_mdx", { request });
+}
+
+/** MDX 导入进度事件 payload（大词库分批写库时上报）。 */
+export interface DictionaryImportProgress {
+  dictionaryId: string;
+  /** parsing = 解析索引；importing = 批量写库。 */
+  phase: "parsing" | "importing";
+  imported: number;
+  total: number;
+}
+
+/** 订阅 MDX 导入进度；返回取消订阅函数。 */
+export function onDictionaryImportProgress(
+  handler: (progress: DictionaryImportProgress) => void,
+): Promise<() => void> {
+  return listen<DictionaryImportProgress>("dictionary://import-progress", (event) =>
+    handler(event.payload),
+  );
 }
 
 export async function deleteDictionary(id: string): Promise<void> {

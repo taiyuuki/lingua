@@ -17,7 +17,7 @@ use lingua_database::{DictionaryInfo, DictionaryMeta, VocabularyFilter, Vocabula
 use lingua_dictionary::parse_tsv;
 use lingua_secrets::{KeyringSecretStore, SecretRef, SecretStore};
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// 应用基本信息（Phase 0 用于验证 IPC 链路）。
 #[derive(Serialize)]
@@ -577,6 +577,104 @@ pub async fn import_dictionary_tsv(
         Ok(ImportDictionaryResult {
             imported_entries,
             skipped_lines: parsed.skipped_lines,
+        })
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// MDX 导入进度事件 payload（事件名 `dictionary://import-progress`）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DictionaryImportProgress {
+    pub dictionary_id: String,
+    /// `parsing` = 解析索引；`importing` = 批量写库。
+    pub phase: &'static str,
+    pub imported: usize,
+    pub total: usize,
+}
+
+/// MDX 每批写库的词条数（单事务粒度，控制数据库互斥锁的持有时长）。
+const MDX_IMPORT_BATCH: usize = 5000;
+
+/// 从 MDX（MDict）文件导入词典。
+///
+/// 大词库（几十万词条）分批写库并通过 `dictionary://import-progress`
+/// 事件上报进度；释义 HTML 转纯文本；注册码加密的词库返回明确错误。
+#[tauri::command]
+pub async fn import_dictionary_mdx(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    request: ImportDictionaryRequest,
+) -> Result<ImportDictionaryResult, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = request.id.trim().to_string();
+        if id.is_empty() {
+            return Err(AppError::InvalidInput(
+                "dictionary id is required".to_string(),
+            ));
+        }
+        let emit_progress = |phase: &'static str, imported: usize, total: usize| {
+            let _ = app.emit(
+                "dictionary://import-progress",
+                DictionaryImportProgress {
+                    dictionary_id: id.clone(),
+                    phase,
+                    imported,
+                    total,
+                },
+            );
+        };
+
+        emit_progress("parsing", 0, 0);
+        let dict =
+            lingua_dictionary::mdx::MdxFile::open(std::path::Path::new(&request.path))?;
+        let total = dict.entry_count();
+        if total == 0 {
+            return Err(AppError::InvalidInput(format!(
+                "no valid entries found in `{}`",
+                request.path
+            )));
+        }
+        let meta = DictionaryMeta {
+            id: id.clone(),
+            name: request.name.trim().to_string(),
+            source_language: request.source_language.clone(),
+            gloss_language: request.gloss_language.clone(),
+        };
+        let source_language = request.source_language;
+        let gloss_language = request.gloss_language;
+
+        let mut batch = Vec::with_capacity(MDX_IMPORT_BATCH);
+        let mut imported = 0usize;
+        let mut skipped = 0usize;
+        for entry in dict.entries() {
+            if entry.is_redirect() {
+                skipped += 1;
+                continue;
+            }
+            batch.push(entry.to_dictionary_entry(&source_language, &gloss_language, &id));
+            if batch.len() >= MDX_IMPORT_BATCH {
+                imported += database.import_dictionary(&meta, &batch)?;
+                emit_progress("importing", imported, total);
+                batch.clear();
+            }
+        }
+        if !batch.is_empty() {
+            imported += database.import_dictionary(&meta, &batch)?;
+        }
+        emit_progress("importing", imported, total);
+        tracing::info!(
+            dictionary = %meta.id,
+            imported,
+            skipped,
+            total,
+            "mdx dictionary imported"
+        );
+        Ok(ImportDictionaryResult {
+            imported_entries: imported,
+            skipped_lines: skipped,
         })
     })
     .await

@@ -105,6 +105,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::save_app_settings,
             commands::list_dictionaries,
             commands::import_dictionary_tsv,
+            commands::import_dictionary_mdx,
             commands::delete_dictionary,
             commands::list_vocabulary,
             commands::update_vocabulary,

@@ -13,14 +13,20 @@ import {
   NList,
   NListItem,
   NPopconfirm,
+  NProgress,
   NSelect,
   NSpace,
   NTag,
   NText,
 } from "naive-ui";
-import { TSV_FORMAT_HINT, useDictionariesStore } from "../stores/dictionaries";
+import {
+  MDX_FORMAT_HINT,
+  TSV_FORMAT_HINT,
+  isMdxPath,
+  useDictionariesStore,
+} from "../stores/dictionaries";
 import { SUPPORTED_TARGET_LANGUAGES } from "../stores/settings";
-import { pickTsvFilePath } from "../lib/api";
+import { pickDictionaryFilePath } from "../lib/api";
 
 const store = useDictionariesStore();
 const {
@@ -29,6 +35,7 @@ const {
   importError,
   importMessage,
   importing,
+  importProgress,
   form,
 } = storeToRefs(store);
 
@@ -39,10 +46,21 @@ const languageSelectOptions = computed(() =>
   })),
 );
 
-/** 文件选择框选 TSV，直接填进路径输入（仍可手改）。 */
-async function browseTsv(): Promise<void> {
+/** 选中的是 MDX 词库时切换格式提示与导入命令。 */
+const isMdxFile = computed(() => isMdxPath(form.value.path));
+const formatHint = computed(() => (isMdxFile.value ? MDX_FORMAT_HINT : TSV_FORMAT_HINT));
+const importPercentage = computed(() => {
+  const progress = importProgress.value;
+  if (!progress || progress.total === 0) {
+    return 0;
+  }
+  return Math.round((progress.imported / progress.total) * 100);
+});
+
+/** 文件选择框选词典文件，直接填进路径输入（仍可手改）。 */
+async function browseDictionaryFile(): Promise<void> {
   try {
-    const path = await pickTsvFilePath();
+    const path = await pickDictionaryFilePath();
     if (path) {
       form.value.path = path;
     }
@@ -200,15 +218,15 @@ onMounted(() => {
           </n-form-item>
         </n-space>
 
-        <n-form-item label="TSV 文件路径">
+        <n-form-item label="词典文件路径">
           <n-input-group>
             <n-input
               v-model:value="form.path"
-              placeholder="点「浏览…」选择，或输入 .tsv 文件路径"
+              placeholder="点「浏览…」选择 .tsv / .mdx，或输入文件路径"
             />
             <n-button
               secondary
-              @click="browseTsv"
+              @click="browseDictionaryFile"
             >
               浏览…
             </n-button>
@@ -218,14 +236,32 @@ onMounted(() => {
           depth="3"
           class="format-hint"
         >
-          {{ TSV_FORMAT_HINT }}
+          {{ formatHint }}
         </n-text>
+
+        <n-space
+          v-if="importing && importProgress"
+          vertical
+          :size="4"
+        >
+          <n-text depth="3">
+            {{ importProgress.phase === "parsing"
+              ? "正在解析词库索引…"
+              : `正在导入：${importProgress.imported} / ${importProgress.total} 词条` }}
+          </n-text>
+          <n-progress
+            type="line"
+            :percentage="importPercentage"
+            :height="8"
+            :show-indicator="false"
+          />
+        </n-space>
 
         <n-space align="center">
           <n-button
             type="primary"
             :loading="importing"
-            @click="store.importTsv()"
+            @click="store.importDictionary()"
           >
             {{ importing ? "导入中…" : "开始导入" }}
           </n-button>

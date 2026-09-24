@@ -2552,8 +2552,12 @@ name = "lingua-dictionary"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "encoding_rs",
+ "flate2",
  "lingua-core",
  "lingua-database",
+ "lzokay",
+ "ripemd",
  "tokio",
  "tracing",
 ]
@@ -2641,6 +2645,15 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
+
+[[package]]
+name = "lzokay"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "953d350dc065718bb00b61ea2118274ffe2fdf6488f32f720422bcd1c9d6025f"
+dependencies = [
+ "zerocopy",
+]
 
 [[package]]
 name = "markup5ever"
@@ -3685,6 +3698,15 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "ripemd"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd124222d17ad93a644ed9d011a40f4fb64aa54275c08cc216524a9ea82fb09f"
+dependencies = [
+ "digest 0.10.7",
 ]
 
 [[package]]
