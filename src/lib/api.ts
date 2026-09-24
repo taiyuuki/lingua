@@ -21,7 +21,7 @@ export interface DatabaseStatus {
 
 /** 与 Rust `PopupState` 对应（internally tagged）。 */
 export type PopupState =
-  | { status: "loading" }
+  | { status: "loading"; sourceText: string | null }
   | ({ status: "result" } & TranslationResult)
   | { status: "error"; kind: string; message: string };
 
@@ -208,6 +208,11 @@ export async function broadcastThemeChanged(theme: string): Promise<void> {
 
 export function onThemeChanged(handler: (theme: string) => void): Promise<() => void> {
   return listen<string>("theme://changed", (event) => handler(event.payload));
+}
+
+/** 流式译文增量（payload 为到目前为止的完整译文，直接替换渲染）。 */
+export function onPopupDelta(handler: (text: string) => void): Promise<() => void> {
+  return listen<string>("popup://delta", (event) => handler(event.payload));
 }
 
 export async function performOcrTranslation(

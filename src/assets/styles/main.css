@@ -488,6 +488,10 @@ body {
   overflow-wrap: anywhere;
 }
 
+.streaming-hint {
+  color: var(--color-text-secondary);
+}
+
 .popup-alternatives {
   flex-shrink: 0;
   margin: 0;

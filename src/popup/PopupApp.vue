@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getAppSettings,
   hidePopup,
   latestPopupState,
+  onPopupDelta,
   onPopupState,
   onThemeChanged,
   saveToVocabulary,
@@ -14,13 +16,16 @@ import { applyTheme, normalizeTheme } from "../lib/theme";
 
 // 快照同款「事件 + 快照」双通道；窗口复用，靠通知保持最新状态。
 // 布局参考 Bob：顶部工具栏（置顶/收藏/复制原文）→ 原文区 → 译文卡片。
-const state = ref<PopupState>({ status: "loading" });
+const state = ref<PopupState>({ status: "loading", sourceText: null });
+// 流式翻译：Loading 期间增量到达的译文（每次都是完整前缀，直接替换）
+const streamed = reactive({ text: "" });
 const copiedSource = ref(false);
 const copiedTranslation = ref(false);
 const saved = ref(false);
 const pinned = ref(true);
 let unlisten: (() => void) | null = null;
 let unlistenTheme: (() => void) | null = null;
+let unlistenDelta: (() => void) | null = null;
 
 const engineLabel = computed(() =>
   state.value.status === "result" ? (state.value.dictionary?.source ?? "AI 翻译") : "",
@@ -91,13 +96,18 @@ onMounted(async () => {
   } catch {
     applyTheme("dark");
   }
+  const stopDelta = await onPopupDelta((text) => {
+    streamed.text = text;
+  });
   const stop = await onPopupState((next) => {
     state.value = next;
+    streamed.text = "";
     copiedSource.value = false;
     copiedTranslation.value = false;
     saved.value = false;
   });
   unlisten = stop;
+  unlistenDelta = stopDelta;
   const snapshot = await latestPopupState();
   if (snapshot) {
     state.value = snapshot;
@@ -108,7 +118,20 @@ onUnmounted(() => {
   window.removeEventListener("keydown", onKeydown);
   unlisten?.();
   unlistenTheme?.();
+  unlistenDelta?.();
 });
+
+// 无边框窗口拖动：工具栏按下（按钮除外）即开始拖拽。
+function onToolbarMouseDown(event: MouseEvent): void {
+  if (event.button !== 0) {
+    return;
+  }
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("button")) {
+    return;
+  }
+  void getCurrentWindow().startDragging();
+}
 </script>
 
 <template>
@@ -116,7 +139,7 @@ onUnmounted(() => {
     <!-- 工具栏：置顶 | 收藏 / 复制原文 -->
     <div
       class="popup-toolbar"
-      data-tauri-drag-region
+      @mousedown="onToolbarMouseDown"
     >
       <button
         class="tool-btn"
@@ -190,16 +213,41 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <!-- 加载中 -->
+    <!-- 加载中：原文先行，流式译文增量填充 -->
     <div
       v-if="state.status === 'loading'"
-      class="popup-loading"
+      class="popup-scroll"
     >
-      <span
-        class="spinner"
-        aria-hidden="true"
-      />
-      <span>正在翻译…</span>
+      <template v-if="state.sourceText">
+        <p class="popup-source">
+          {{ state.sourceText }}
+        </p>
+        <div class="popup-source-meta">
+          <span class="chip">翻译中…</span>
+        </div>
+      </template>
+      <div class="result-card">
+        <div class="result-card-header">
+          <span class="result-engine">译文</span>
+          <span
+            v-if="!streamed.text"
+            class="spinner"
+            aria-hidden="true"
+          />
+        </div>
+        <p
+          v-if="streamed.text"
+          class="popup-translation"
+        >
+          {{ streamed.text }}
+        </p>
+        <p
+          v-else
+          class="popup-translation streaming-hint"
+        >
+          正在翻译…
+        </p>
+      </div>
     </div>
 
     <!-- 翻译结果 -->

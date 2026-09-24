@@ -16,9 +16,15 @@ use lingua_core::OcrImage;
     rename_all_fields = "camelCase"
 )]
 pub enum PopupState {
-    Loading,
+    /// 加载中；拿到原文后先行展示（流式翻译的起点）。
+    Loading {
+        source_text: Option<String>,
+    },
     Result(Box<TranslationResult>),
-    Error { kind: String, message: String },
+    Error {
+        kind: String,
+        message: String,
+    },
 }
 
 /// 一次 OCR 截图会话：整屏快照（内存中，不落盘）+ 逻辑尺寸，

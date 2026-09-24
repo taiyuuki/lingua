@@ -210,7 +210,7 @@ async fn run(app: &AppHandle, rect: Rect) -> AppResult<()> {
         "cropping ocr selection"
     );
 
-    popup::show(app, PopupState::Loading).await?;
+    popup::show(app, PopupState::Loading { source_text: None }).await?;
     let capture = tauri::async_runtime::spawn_blocking(move || {
         lingua_platform::crop_image(&session.image, [px_x, px_y, px_width, px_height])
     })
@@ -231,6 +231,15 @@ async fn run(app: &AppHandle, rect: Rect) -> AppResult<()> {
         "ocr completed"
     );
 
+    // 识别完成：把识别文本先亮出来，翻译流式填充。
+    popup::show(
+        app,
+        PopupState::Loading {
+            source_text: Some(ocr.text.clone()),
+        },
+    )
+    .await?;
+
     // 4. 翻译（复用划词的 Router + Engine；多行文本走 AI 分支）。
     let router = pipeline::build_router(&state.database.clone())?;
     let ai_provider = router.provider_for(lingua_ai::AiTask::Translate)?;
@@ -242,7 +251,14 @@ async fn run(app: &AppHandle, rect: Rect) -> AppResult<()> {
         ocr.text.clone(),
         pipeline::target_language(&state.database)?,
     );
-    let mut result = engine.translate(&request).await?;
+    let app_for_delta = app.clone();
+    let mut result = engine
+        .translate_stream(&request, &mut |text: String| {
+            if let Err(error) = app_for_delta.emit("popup://delta", text) {
+                tracing::warn!(error = %error, "failed to emit popup delta");
+            }
+        })
+        .await?;
     result.source_text = ocr.text;
     if result.detected_language.is_none() {
         result.detected_language = ocr.language.as_deref().map(lingua_core::Language::parse);

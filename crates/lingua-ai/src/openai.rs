@@ -66,6 +66,8 @@ struct ChatCompletionsBody<'a> {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream: Option<bool>,
 }
 
 /// 把 `extra_body`（厂商扩展参数，JSON 对象）逐键合并进请求体；
@@ -123,42 +125,8 @@ impl crate::provider::AIProvider for OpenAiCompatibleProvider {
     }
 
     async fn chat(&self, request: &ChatRequest) -> AppResult<ChatResponse> {
-        let url = self.chat_url()?;
-        let model = request
-            .model
-            .as_deref()
-            .or(self.config.model.as_deref())
-            .map(str::to_owned);
-        let typed = ChatCompletionsBody {
-            model: model.as_deref(),
-            messages: &request.messages,
-            temperature: request.temperature,
-            max_tokens: request.max_tokens,
-        };
-        let mut body =
-            serde_json::to_value(&typed).map_err(|error| AppError::Internal(error.to_string()))?;
-        merge_extra_body(&mut body, self.config.extra_body.as_ref());
-
-        let mut http_request = self.http.post(url).json(&body);
-        if let Some(key) = self.config.api_key.as_deref().filter(|key| !key.is_empty()) {
-            http_request = http_request.bearer_auth(key);
-        }
-        if let Some(org) = self.config.organization.as_deref() {
-            http_request = http_request.header("OpenAI-Organization", org);
-        }
-
-        let response = http_request.send().await.map_err(map_request_error)?;
-        let status = response.status();
-        let text = response.text().await.map_err(map_request_error)?;
-
-        if !status.is_success() {
-            let message = serde_json::from_str::<ChatCompletionsResponse>(&text)
-                .ok()
-                .and_then(|parsed| parsed.error)
-                .and_then(|error| error.message)
-                .unwrap_or_else(|| truncate_for_message(&text));
-            return Err(map_status_error(&self.config.id, status.as_u16(), message));
-        }
+        let response = self.send(request, false).await?;
+        let text = response_text(response).await?;
 
         let parsed: ChatCompletionsResponse =
             serde_json::from_str(&text).map_err(|error| AppError::Provider {
@@ -191,6 +159,141 @@ impl crate::provider::AIProvider for OpenAiCompatibleProvider {
             finish_reason: choice.finish_reason.clone(),
         })
     }
+
+    async fn chat_stream(
+        &self,
+        request: &ChatRequest,
+        on_delta: &mut (dyn FnMut(String) + Send),
+    ) -> AppResult<ChatResponse> {
+        let response = self.send(request, true).await?;
+        Self::consume_sse(response, self.config.id.clone(), on_delta).await
+    }
+}
+
+impl OpenAiCompatibleProvider {
+    /// 构造并发送 chat/completions 请求（chat 与 chat_stream 共用）。
+    async fn send(&self, request: &ChatRequest, stream: bool) -> AppResult<reqwest::Response> {
+        let url = self.chat_url()?;
+        let model = request
+            .model
+            .as_deref()
+            .or(self.config.model.as_deref())
+            .map(str::to_owned);
+        let typed = ChatCompletionsBody {
+            model: model.as_deref(),
+            messages: &request.messages,
+            temperature: request.temperature,
+            max_tokens: request.max_tokens,
+            stream: stream.then_some(true),
+        };
+        let mut body =
+            serde_json::to_value(&typed).map_err(|error| AppError::Internal(error.to_string()))?;
+        merge_extra_body(&mut body, self.config.extra_body.as_ref());
+
+        let mut http_request = self.http.post(url).json(&body);
+        if let Some(key) = self.config.api_key.as_deref().filter(|key| !key.is_empty()) {
+            http_request = http_request.bearer_auth(key);
+        }
+        if let Some(org) = self.config.organization.as_deref() {
+            http_request = http_request.header("OpenAI-Organization", org);
+        }
+
+        let response = http_request.send().await.map_err(map_request_error)?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.map_err(map_request_error)?;
+            let message = serde_json::from_str::<ChatCompletionsResponse>(&text)
+                .ok()
+                .and_then(|parsed| parsed.error)
+                .and_then(|error| error.message)
+                .unwrap_or_else(|| truncate_for_message(&text));
+            return Err(map_status_error(&self.config.id, status.as_u16(), message));
+        }
+        Ok(response)
+    }
+
+    /// 消费 SSE 流：解析 `data: {...}` 事件，把增量内容实时回调给
+    /// `on_delta`（回调收到的是**到目前为止的完整文本**，前端可直接
+    /// 替换渲染，天然抗丢事件）。
+    async fn consume_sse<F: FnMut(String) + Send + ?Sized>(
+        response: reqwest::Response,
+        provider_id: String,
+        on_delta: &mut F,
+    ) -> AppResult<ChatResponse> {
+        use futures_util::StreamExt;
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+        let mut content = String::new();
+        let mut model: Option<String> = None;
+        let mut finish_reason: Option<String> = None;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(map_request_error)?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(newline) = buffer.find('\n') {
+                let line: String = buffer.drain(..=newline).collect();
+                let line = line.trim_end();
+                let Some(payload) = line.strip_prefix("data: ") else {
+                    continue;
+                };
+                let payload = payload.trim();
+                if payload == "[DONE]" {
+                    continue;
+                }
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+                    continue; // 心跳/注释行等
+                };
+                if let Some(error) = value.get("error") {
+                    let message = error
+                        .get("message")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown provider error");
+                    return Err(AppError::Provider {
+                        provider: provider_id,
+                        message: message.to_string(),
+                    });
+                }
+                if let Some(name) = value.get("model").and_then(serde_json::Value::as_str) {
+                    model = Some(name.to_string());
+                }
+                if let Some(choice) = value
+                    .get("choices")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|choices| choices.first())
+                {
+                    if let Some(delta) = choice
+                        .get("delta")
+                        .and_then(|delta| delta.get("content"))
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        if !delta.is_empty() {
+                            content.push_str(delta);
+                            on_delta(content.clone());
+                        }
+                    }
+                    if let Some(reason) = choice
+                        .get("finish_reason")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        finish_reason = Some(reason.to_string());
+                    }
+                }
+            }
+        }
+
+        Ok(ChatResponse {
+            content,
+            model,
+            finish_reason,
+        })
+    }
+}
+
+/// 把响应体读成文本（传输错误 → Network/Timeout）。
+async fn response_text(response: reqwest::Response) -> AppResult<String> {
+    response.text().await.map_err(map_request_error)
 }
 
 fn map_request_error(error: reqwest::Error) -> AppError {
@@ -390,6 +493,59 @@ mod tests {
         let not_object = serde_json::json!([1, 2, 3]);
         merge_extra_body(&mut body, Some(&not_object));
         assert_eq!(body["model"], "x");
+    }
+
+    #[tokio::test]
+    async fn sse_stream_emits_accumulated_deltas() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 8192];
+            let mut request = String::new();
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                request.push_str(&String::from_utf8_lossy(&buffer[..read]));
+                if request.contains("\r\n\r\n") {
+                    break;
+                }
+            }
+            assert!(
+                request.contains("\"stream\":true"),
+                "must request stream: {request}"
+            );
+
+            let body = "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\n\
+                data: {\"choices\":[{\"delta\":{\"content\":\"世界\"}}]}\n\n\
+                data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n\
+                data: [DONE]\n\n";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            let _ = stream.flush();
+        });
+
+        let mut config = ProviderConfig::new("sse", "SSE");
+        config.base_url = Some(format!("http://{addr}/v1"));
+        let provider = OpenAiCompatibleProvider::new(config).unwrap();
+
+        let deltas = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let collected = deltas.clone();
+        let response = provider
+            .chat_stream(&sample_request(), &mut |text: String| {
+                collected.lock().unwrap().push(text);
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.content, "你好世界");
+        let deltas = deltas.lock().unwrap();
+        assert_eq!(deltas.len(), 2, "最终 [DONE] 前的两次增量都要回调");
+        assert_eq!(deltas[0], "你好");
+        assert_eq!(deltas[1], "你好世界");
     }
 
     #[test]

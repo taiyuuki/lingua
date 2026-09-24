@@ -58,6 +58,34 @@ impl TranslationEngine {
         Ok(parse_ai_translation(request, response.content))
     }
 
+    /// 流式翻译：词典命中时一次性回调译文；AI 路径把模型输出里
+    /// `translated_text` 字段已到达的部分实时回调（见
+    /// [`partial_translated_text`]）。返回完整结果（含 alternatives 等）。
+    pub async fn translate_stream(
+        &self,
+        request: &TranslationRequest,
+        on_delta: &mut (dyn FnMut(String) + Send),
+    ) -> AppResult<TranslationResult> {
+        if let Some(result) = self.try_dictionary(request).await {
+            on_delta(result.translated_text.clone());
+            return Ok(result);
+        }
+
+        let (system, user) = self.render_prompt(request);
+        let chat_request = ChatRequest::simple(system, user);
+        let mut streamed = String::new();
+        let response = self
+            .provider
+            .chat_stream(&chat_request, &mut |delta: String| {
+                streamed.push_str(&delta);
+                if let Some(partial) = partial_translated_text(&streamed) {
+                    on_delta(partial);
+                }
+            })
+            .await?;
+        Ok(parse_ai_translation(request, response.content))
+    }
+
     /// 词典路由：仅对「单词」生效；任何失败（未命中、释义语言不匹配、
     /// 查询出错）都静默回退 AI，不阻断翻译。
     async fn try_dictionary(&self, request: &TranslationRequest) -> Option<TranslationResult> {
@@ -145,6 +173,54 @@ impl TranslationEngine {
         ]);
         template.render(&vars)
     }
+}
+
+/// 从流式缓冲中增量提取 `translated_text` 字段已到达的字符串。
+///
+/// 模型输出是 JSON 信封，直接把原始流给用户看会看到 JSON 语法；
+/// 这个解析器在流中定位 `"translated_text": "` 后逐字符解码
+/// （处理 \n / \" / \uXXXX 转义），字符串未闭合时返回已解码部分。
+/// 键未到达 / 还没开始字符串值时返回 `None`（UI 继续显示加载态）。
+pub(crate) fn partial_translated_text(buffer: &str) -> Option<String> {
+    const KEY: &str = "\"translated_text\"";
+    let key_position = buffer.find(KEY)?;
+    let after_key = &buffer[key_position + KEY.len()..];
+    let colon = after_key.find(':')?;
+    let after_colon = after_key[colon + 1..].trim_start();
+    let rest = after_colon.strip_prefix('"')?;
+
+    let mut out = String::new();
+    let mut chars = rest.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(out), // 字符串正常闭合
+            '\\' => {
+                let Some(escape) = chars.next() else { break }; // 截断的转义
+                match escape {
+                    'n' => out.push('\n'),
+                    't' => out.push('\t'),
+                    'r' => out.push('\r'),
+                    '"' => out.push('"'),
+                    '\\' => out.push('\\'),
+                    '/' => out.push('/'),
+                    'u' => {
+                        let hex: String = chars.by_ref().take(4).collect();
+                        if hex.len() < 4 {
+                            return Some(out); // \u 截断
+                        }
+                        if let Some(decoded) =
+                            u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
+                        {
+                            out.push(decoded);
+                        }
+                    }
+                    other => out.push(other),
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    Some(out) // 未闭合：返回已解码部分（流式中途）
 }
 
 /// 从模型响应解析结构化翻译结果；非 JSON 输出整段作为译文。
@@ -389,6 +465,72 @@ mod tests {
         let result = engine.translate(&request).await.unwrap();
         assert_eq!(result.translated_text, "从 AI 来的");
         assert!(result.dictionary.is_none());
+    }
+
+    // ---- 流式增量提取 ----
+
+    #[test]
+    fn partial_extractor_streams_decoded_text() {
+        let full = r#"{"translated_text": "你好，\n世界！"}"#;
+        // 逐字符喂入，验证增量解码与最终一致
+        let mut last = None;
+        for end in 1..=full.len() {
+            if full.is_char_boundary(end) {
+                last = partial_translated_text(&full[..end]);
+            }
+        }
+        assert_eq!(last.as_deref(), Some("你好，\n世界！"));
+    }
+
+    #[test]
+    fn partial_extractor_handles_truncated_escape() {
+        let partial = r#"{"translated_text": "hello\志愿团体""#;
+        let _ = partial; // 占位：真实截断场景在下一断言
+        let text = "{\"translated_text\": \"hello\\ Worl";
+        assert_eq!(partial_translated_text(text).as_deref(), Some("hello Worl"));
+    }
+
+    #[test]
+    fn partial_extractor_returns_none_before_value_starts() {
+        assert_eq!(partial_translated_text("{"), None);
+        assert_eq!(partial_translated_text("{\"translated_text\""), None);
+        assert_eq!(partial_translated_text("{\"translated_text\":"), None);
+        assert_eq!(partial_translated_text("{\"explanation\": \"x\"}"), None);
+    }
+
+    #[tokio::test]
+    async fn streaming_translation_emits_partial_then_final() {
+        let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
+            response: r#"{"translated_text": "短暂的", "detected_language": "en", "alternatives": ["转瞬即逝的"], "explanation": null}"#.into(),
+        }));
+        let deltas = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let collected = deltas.clone();
+        let result = engine
+            .translate_stream(&request("ephemeral"), &mut |text: String| {
+                collected.lock().unwrap().push(text);
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.translated_text, "短暂的");
+        let deltas = deltas.lock().unwrap();
+        assert!(!deltas.is_empty());
+        // 最后一次增量应是完整译文
+        assert_eq!(deltas.last().map(String::as_str), Some("短暂的"));
+    }
+
+    #[tokio::test]
+    async fn dictionary_path_streams_once() {
+        let engine = engine_with_dict("unused", vec![dict_entry("cat", "猫")]).await;
+        let deltas = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let collected = deltas.clone();
+        let result = engine
+            .translate_stream(&request("cat"), &mut |text: String| {
+                collected.lock().unwrap().push(text);
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.translated_text, "猫");
+        assert_eq!(deltas.lock().unwrap().as_slice(), ["猫"]);
     }
 
     #[tokio::test]

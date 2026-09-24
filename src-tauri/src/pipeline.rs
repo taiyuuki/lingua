@@ -17,7 +17,7 @@ use lingua_secrets::{KeyringSecretStore, SecretRef, SecretStore};
 use lingua_translation::TranslationEngine;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// settings 表中的键名（集中定义，避免散落字符串）。
 pub const SETTINGS_DEFAULT_PROVIDER: &str = "ai.default_provider_id";
@@ -54,8 +54,14 @@ async fn run(app: &AppHandle) -> AppResult<()> {
         "selection captured"
     );
 
-    // 2. 立即弹 popup 展示加载态（用户有反馈，翻译可能耗时数秒）。
-    popup::show(app, PopupState::Loading).await?;
+    // 2. 立即弹 popup 展示原文（流式：译文随后增量到达）。
+    popup::show(
+        app,
+        PopupState::Loading {
+            source_text: Some(selected.text.clone()),
+        },
+    )
+    .await?;
 
     // 3. 经 Router 选出 Translate 任务的 Provider，组装引擎并翻译。
     //    引擎内部先查词典（单词 + 命中时直接返回），否则走 AI。
@@ -65,7 +71,14 @@ async fn run(app: &AppHandle) -> AppResult<()> {
         Arc::new(SqliteDictionaryProvider::new(state.database.clone()));
     let engine = TranslationEngine::new(provider).with_dictionary(Some(dictionary));
     let request = TranslationRequest::new(selected.text, target_language(&state.database)?);
-    let result = engine.translate(&request).await?;
+    let app_for_delta = app.clone();
+    let result = engine
+        .translate_stream(&request, &mut |text: String| {
+            if let Err(error) = app_for_delta.emit("popup://delta", text) {
+                tracing::warn!(error = %error, "failed to emit popup delta");
+            }
+        })
+        .await?;
 
     // 4. 单词查询自动记入生词本（短语/句子不记）；
     //    在 result 移入 popup 前先取出需要的数据，写库放在 popup 展示之后。

@@ -22,6 +22,20 @@ pub trait AIProvider: Send + Sync {
     /// 对话补全（翻译、解释、学习分析等都走这里）。
     async fn chat(&self, request: &ChatRequest) -> AppResult<ChatResponse>;
 
+    /// 流式对话补全：内容增量到达时调用 `on_delta`，回调参数是
+    /// **到目前为止的完整文本**（前端直接替换渲染，天然抗丢事件）。
+    /// 用 `String` 而非 `&str` 避免高阶生命周期与 async-trait 的兼容问题。
+    /// 默认实现退化为非流式：拿到完整结果后回调一次。
+    async fn chat_stream(
+        &self,
+        request: &ChatRequest,
+        on_delta: &mut (dyn FnMut(String) + Send),
+    ) -> AppResult<ChatResponse> {
+        let response = self.chat(request).await?;
+        on_delta(response.content.clone());
+        Ok(response)
+    }
+
     /// 视觉理解，作为 OCR 的高级 fallback。
     async fn vision(&self, _request: &VisionRequest) -> AppResult<ChatResponse> {
         Err(AppError::Provider {
