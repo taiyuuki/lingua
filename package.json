@@ -10,7 +10,8 @@
     "typecheck": "vue-tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "tauri:dev": "tauri dev"
+    "tauri:dev": "tauri dev",
+    "icon": "node scripts/render_icon.mjs && tauri icon assets/icon-1024.png"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
@@ -20,6 +21,7 @@
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@tauri-apps/cli": "^2.11.5",
     "@vitejs/plugin-vue": "^6.0.9",
     "@vue/eslint-config-typescript": "^14.9.0",

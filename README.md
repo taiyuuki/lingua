@@ -73,6 +73,7 @@ pnpm install            # 安装前端依赖
 pnpm tauri dev          # 开发模式运行桌面应用
 pnpm tauri build        # 打包发布版
 pnpm build              # 仅前端构建（vue-tsc + vite）
+pnpm icon               # 由 assets/icon.svg 重渲染应用图标全格式
 pnpm lint               # ESLint
 pnpm test               # vitest 前端测试
 

@@ -6,6 +6,9 @@ dist/
 target/
 src-tauri/gen/schemas/
 
+# 图标：SVG 是源图，PNG/全格式由 `pnpm icon` 再生
+assets/icon-1024.png
+
 # Editor / OS
 .DS_Store
 *.log
