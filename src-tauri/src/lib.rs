@@ -5,6 +5,7 @@
 //! 业务逻辑在 crates/*（platform / ai / translation / database / secrets）。
 
 mod commands;
+mod ocr;
 mod pipeline;
 mod popup;
 mod state;
@@ -81,6 +82,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::delete_vocabulary,
             commands::vocabulary_tags,
             commands::save_to_vocabulary,
+            commands::start_ocr_capture,
+            commands::perform_ocr_translation,
+            commands::cancel_ocr,
+            commands::screen_recording_status,
         ])
         .run(tauri::generate_context!())?;
     Ok(())

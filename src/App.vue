@@ -11,12 +11,36 @@ import RouterSettings from "./components/RouterSettings.vue";
 const appStore = useAppStore();
 const { appInfo, database, errorMessage } = storeToRefs(appStore);
 
+import { screenRecordingStatus, startOcrCapture } from "./lib/api";
+import { ref } from "vue";
+
 const settings = useSettingsStore();
 const { shortcut, permissionGranted } = storeToRefs(settings);
+const screenRecording = ref<boolean | null>(null);
+const ocrError = ref<string | null>(null);
+
+async function refreshScreenRecording(): Promise<void> {
+  try {
+    screenRecording.value = await screenRecordingStatus();
+  } catch {
+    screenRecording.value = null;
+  }
+}
+
+async function startOcr(): Promise<void> {
+  ocrError.value = null;
+  try {
+    await startOcrCapture();
+  } catch (error) {
+    ocrError.value = String(error);
+  }
+  void refreshScreenRecording();
+}
 
 onMounted(() => {
   void appStore.refresh();
   void settings.load();
+  void refreshScreenRecording();
 });
 </script>
 
@@ -60,6 +84,35 @@ onMounted(() => {
         class="error-banner"
       >
         {{ errorMessage }}
+      </p>
+      <p
+        v-if="screenRecording === false"
+        class="warn-banner"
+      >
+        截图翻译需要「屏幕录制」权限：请在「系统设置 → 隐私与安全性 →
+        屏幕与系统录音」中授权 Lingua，然后重启应用。
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>截图翻译</h2>
+      <p class="muted">
+        OCR 引擎在「路由与快捷键」里配置（默认本机
+        tesseract，也可指向本地 PaddleOCR sidecar）。识别出的文字会走
+        AI 翻译并在 Popup 中显示；截图不落盘。
+      </p>
+      <button
+        class="btn"
+        type="button"
+        @click="startOcr"
+      >
+        截图翻译（框选屏幕区域）
+      </button>
+      <p
+        v-if="ocrError"
+        class="error-banner"
+      >
+        {{ ocrError }}
       </p>
     </section>
 

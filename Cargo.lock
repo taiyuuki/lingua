@@ -2465,6 +2465,7 @@ dependencies = [
  "lingua-core",
  "lingua-database",
  "lingua-dictionary",
+ "lingua-ocr",
  "lingua-platform",
  "lingua-secrets",
  "lingua-translation",
@@ -2519,6 +2520,19 @@ dependencies = [
  "async-trait",
  "lingua-core",
  "lingua-database",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "lingua-ocr"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "lingua-core",
+ "reqwest",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

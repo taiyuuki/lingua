@@ -23,6 +23,7 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
         popup: fileURLToPath(new URL("./popup.html", import.meta.url)),
+        ocr: fileURLToPath(new URL("./ocr.html", import.meta.url)),
       },
     },
   },

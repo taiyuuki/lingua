@@ -29,7 +29,7 @@ OS / Network / SQLite / Models
 | Crate | 职责 | 状态 |
 |-------|------|------|
 | `lingua-core` | 领域模型：`AppError`（含 `NoSelection`）、`Language`、`SelectedText`、`TranslationRequest/Result`，IPC 序列化契约（camelCase） | ✅ Phase 0/1 |
-| `lingua-platform` | `SelectionProvider` trait + `SelectionService` fallback 编排；macOS 实现（AX 读选区 + Cmd+C 剪贴板 fallback + 光标定位）；Windows/Linux 为明确的 unsupported 占位 | ✅ macOS Phase 1 |
+| `lingua-platform` | `SelectionProvider` + `SelectionService`；macOS 实现（AX 选区 + 剪贴板 fallback + 光标/截图：`screencapture` CLI + 屏幕录制权限 FFI）；Windows/Linux 明确占位 | ✅ macOS Phase 1/5 |
 | `lingua-ai` | `AIProvider` trait、`OpenAiCompatibleProvider`（reqwest/rustls）、`AIRouter`（AiTask → Provider 路由 + 默认回退）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1/2 |
 | `lingua-translation` | Translation Engine：单词 → 词典优先（释义语言须匹配目标语言），未命中/短语/句子 → AI；`prompts/translate/` 模板内嵌；AI JSON 解析失败优雅降级 | ✅ Phase 1/3 |
 | `lingua-dictionary` | `DictionaryProvider` trait、SQLite 词典实现、TSV 导入器（CC-CEDICT 等公开词典可先转 TSV 再导入） | ✅ Phase 3 |
@@ -159,15 +159,35 @@ Capabilities（`src-tauri/capabilities/default.json`）当前只放行
 4. Anki 导出 / AI 生成学习卡片未做（后续阶段）。
 
 
-## 9. Phase 5 待办（下一步）
+## 9. Phase 5 已知限制（OCR）
 
-按原规划进入 **OCR（截图翻译）**：
+1. 已完成：`lingua-core::ocr` 契约（`OcrImage` + `OcrResult`，保留
+   text/bbox/confidence/language/blocks/lines/words 粒度）；
+   `lingua-ocr` crate（`OcrProvider` trait + Tesseract CLI 实现 +
+   HTTP sidecar 实现）；`lingua-platform::capture`（macOS 走系统
+   `screencapture` CLI，屏幕录制权限 FFI 预检/请求，截图即读即删）；
+   全屏透明选区 overlay（`ocr.html` 入口，拖拽框选、Esc/右键取消、
+   误点不退出）；OCR pipeline（隐藏 overlay → 截图 → OCR → 走现有
+   Router/Engine 翻译 → Popup）。
+2. **未真机人工验证**：选区 overlay 的透明度依赖
+   `macOSPrivateApi`（个人使用无碍，App Store 分发不可用）；
+   需要授予「屏幕录制」权限。
+3. Tesseract 中文识别需额外语言包（`brew install tesseract-lang`），
+   且 Phase 5 未传 `-l` 语言参数（自动检测由翻译端处理）。
+4. PaddleOCR 以 sidecar 形式接入（`scripts/paddleocr_server.py`，
+   需自行安装 paddleocr/paddlepaddle）；ONNX 内嵌推理未做。
+5. 图片预处理（二值化/放大）为空操作；「OCR → 原位置覆盖翻译」
+   依赖的 bbox 数据已保留，实现留到后续阶段。
+6. 多显示器：overlay 目前只铺主显示器；`ocr_history` 留到 Phase 8。
 
-1. `lingua-screenshot`：截屏 + 全屏透明选区 overlay 窗口
-   （OCR Selection Window：拖拽选区、取消、重选；平台差异大，
-   macOS 先行，注意屏幕录制权限）。
-2. `lingua-ocr`：`OcrProvider` trait（`OcrResult` 保留 text / bbox /
-   confidence / language / blocks，为未来「原位覆盖翻译」打基础）。
-3. PaddleOCR 接入（第一阶段；Vision LLM 只做后续高级 fallback）。
-4. OCR pipeline：截图 → 预处理 → OCR → 语言检测 → 翻译 → Popup 展示。
-5. `ocr_history` 表留到 Phase 8 History 一起；原始截图默认不落盘。
+## 10. Phase 6 待办（下一步）
+
+按原规划进入 **Vision AI（视觉大模型识别）**：
+
+1. `AiTask::Vision` 路由 + Provider capabilities.vision 分派
+   （OpenAI-compatible 的 `image_url` base64 消息格式）。
+2. OCR 后处理兜底：低置信度 / 空结果时提示「用 Vision 重新识别」；
+   Vision 结果仍输出结构化 blocks（复用 `OcrResult` 契约）。
+3. 设置里为 Vision 任务单独指定 Provider。
+4. `scripts/paddleocr_server.py` 的部署文档化。
+（注：Vision LLM 不替代普通 OCR，只做高级 fallback —— 需求原话。）

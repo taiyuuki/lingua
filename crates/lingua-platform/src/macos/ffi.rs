@@ -37,7 +37,7 @@ unsafe extern "C" {
     fn CFRelease(cf: *const c_void);
 }
 
-// CoreGraphics：光标位置与按键模拟。
+// CoreGraphics：光标位置、按键模拟、屏幕录制权限。
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     fn CGEventCreate(source: *const c_void) -> *mut c_void;
@@ -49,6 +49,9 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn CGEventSetFlags(event: *mut c_void, flags: u64);
     fn CGEventPost(tap: u32, event: *const c_void);
+    // macOS 10.15+：屏幕录制权限（不弹窗预检 / 弹窗请求）。
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
 }
 
 #[repr(C)]
@@ -92,6 +95,16 @@ pub fn is_accessibility_trusted() -> bool {
     let pairs = [(prompt_key, CFBoolean::false_value())];
     let options = CFDictionary::from_CFType_pairs(&pairs);
     unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as *const c_void) != 0 }
+}
+
+/// 屏幕录制权限是否已授予（OCR 截图需要）。
+pub fn is_screen_recording_granted() -> bool {
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+/// 请求屏幕录制权限（首次会弹系统授权框；返回是否已授予）。
+pub fn request_screen_recording_access() -> bool {
+    unsafe { CGRequestScreenCaptureAccess() }
 }
 
 /// 当前光标的全局坐标（逻辑点，屏幕左上角为原点）。

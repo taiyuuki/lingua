@@ -35,6 +35,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const translateProviderId = ref<string>(""); // "" = 跟随默认
   const targetLanguage = ref("zh");
   const shortcut = ref("alt+t");
+  const ocrProvider = ref("tesseract");
+  const ocrTesseractPath = ref("tesseract");
+  const ocrHttpUrl = ref("http://127.0.0.1:8433/ocr");
 
   async function load(): Promise<void> {
     loadError.value = null;
@@ -44,6 +47,9 @@ export const useSettingsStore = defineStore("settings", () => {
       translateProviderId.value = settings.translateProviderId ?? "";
       targetLanguage.value = settings.targetLanguage;
       shortcut.value = settings.shortcut;
+      ocrProvider.value = settings.ocrProvider;
+      ocrTesseractPath.value = settings.ocrTesseractPath;
+      ocrHttpUrl.value = settings.ocrHttpUrl;
       loaded.value = true;
     } catch (error) {
       loadError.value = describeError(error);
@@ -65,6 +71,9 @@ export const useSettingsStore = defineStore("settings", () => {
         translateProviderId: translateProviderId.value === "" ? null : translateProviderId.value,
         targetLanguage: targetLanguage.value,
         shortcut: shortcut.value.trim() || "alt+t",
+        ocrProvider: ocrProvider.value,
+        ocrTesseractPath: ocrTesseractPath.value.trim() || "tesseract",
+        ocrHttpUrl: ocrHttpUrl.value.trim(),
       });
       saveMessage.value = "已保存";
     } catch (error) {
@@ -85,6 +94,9 @@ export const useSettingsStore = defineStore("settings", () => {
     translateProviderId,
     targetLanguage,
     shortcut,
+    ocrProvider,
+    ocrTesseractPath,
+    ocrHttpUrl,
     load,
     save,
   };

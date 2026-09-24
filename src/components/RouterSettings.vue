@@ -11,6 +11,9 @@ const {
   translateProviderId,
   targetLanguage,
   shortcut,
+  ocrProvider,
+  ocrTesseractPath,
+  ocrHttpUrl,
   saveMessage,
   saveError,
   saving,
@@ -102,7 +105,44 @@ onMounted(() => {
             spellcheck="false"
           >
         </label>
+
+        <label class="field">
+          <span>OCR 引擎</span>
+          <select v-model="ocrProvider">
+            <option value="tesseract">
+              本机 tesseract CLI
+            </option>
+            <option value="http">
+              本地 OCR HTTP 服务
+            </option>
+          </select>
+        </label>
       </div>
+
+      <label
+        v-if="ocrProvider === 'tesseract'"
+        class="field"
+      >
+        <span>tesseract 路径（brew install tesseract）</span>
+        <input
+          v-model="ocrTesseractPath"
+          type="text"
+          placeholder="tesseract"
+          spellcheck="false"
+        >
+      </label>
+      <label
+        v-else
+        class="field"
+      >
+        <span>OCR 服务地址（PaddleOCR sidecar 契约）</span>
+        <input
+          v-model="ocrHttpUrl"
+          type="text"
+          placeholder="http://127.0.0.1:8433/ocr"
+          spellcheck="false"
+        >
+      </label>
 
       <div class="form-footer">
         <button

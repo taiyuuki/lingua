@@ -4,6 +4,7 @@
 //! Linux 的特殊逻辑都收敛在本 crate 的平台实现模块中，
 //! 通过 `cfg(target_os = ...)` 隔离，绝不出现在 src-tauri 与前端里。
 
+pub mod capture;
 pub mod os;
 pub mod selection;
 pub mod selection_service;
@@ -12,6 +13,7 @@ pub mod unsupported;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+pub use capture::{capture_region, request_screen_recording_access, screen_recording_granted};
 pub use os::{Os, current_os};
 pub use selection::SelectionProvider;
 pub use selection_service::SelectionService;

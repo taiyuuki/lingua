@@ -287,6 +287,10 @@ pub struct AppSettingsDto {
     /// 划词翻译的目标语言（BCP-47 基础码）。
     pub target_language: Language,
     pub shortcut: String,
+    /// OCR 引擎：`tesseract` | `http`。
+    pub ocr_provider: String,
+    pub ocr_tesseract_path: String,
+    pub ocr_http_url: String,
 }
 
 #[tauri::command]
@@ -303,6 +307,15 @@ pub async fn get_app_settings(
             ),
             target_language: Language::parse(&pipeline::read_target_language_code(&database)),
             shortcut: pipeline::read_shortcut(&database),
+            ocr_provider: pipeline::read_setting(&database, crate::ocr::SETTINGS_OCR_PROVIDER)
+                .unwrap_or_else(|| crate::ocr::OCR_PROVIDER_TESSERACT.to_string()),
+            ocr_tesseract_path: pipeline::read_setting(
+                &database,
+                crate::ocr::SETTINGS_OCR_TESSERACT_PATH,
+            )
+            .unwrap_or_else(|| crate::ocr::DEFAULT_OCR_TESSERACT_PATH.to_string()),
+            ocr_http_url: pipeline::read_setting(&database, crate::ocr::SETTINGS_OCR_HTTP_URL)
+                .unwrap_or_else(|| lingua_ocr::OCR_HTTP_DEFAULT_URL.to_string()),
         })
     })
     .await
@@ -337,6 +350,18 @@ pub async fn save_app_settings(
         database.set_setting(
             pipeline::SETTINGS_TARGET_LANGUAGE,
             &serde_json::json!(settings.target_language.code()),
+        )?;
+        database.set_setting(
+            crate::ocr::SETTINGS_OCR_PROVIDER,
+            &serde_json::json!(settings.ocr_provider),
+        )?;
+        database.set_setting(
+            crate::ocr::SETTINGS_OCR_TESSERACT_PATH,
+            &serde_json::json!(settings.ocr_tesseract_path),
+        )?;
+        database.set_setting(
+            crate::ocr::SETTINGS_OCR_HTTP_URL,
+            &serde_json::json!(settings.ocr_http_url),
         )?;
         database.set_setting(
             pipeline::SETTINGS_SHORTCUT,
@@ -588,4 +613,59 @@ pub async fn save_to_vocabulary(
     })
     .await
     .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+// ---------- OCR 截图翻译（Phase 5） ----------
+
+/// 打开全屏选区 overlay（先预检屏幕录制权限，未授予则触发系统授权框）。
+#[tauri::command]
+pub async fn start_ocr_capture(app: tauri::AppHandle) -> Result<(), AppError> {
+    if !lingua_platform::screen_recording_granted() {
+        lingua_platform::request_screen_recording_access();
+        if !lingua_platform::screen_recording_granted() {
+            return Err(AppError::Permission(
+                "screen recording permission is required for OCR; grant it in System Settings → \
+                 Privacy & Security → Screen & System Audio Recording"
+                    .to_string(),
+            ));
+        }
+    }
+    crate::ocr::show_overlay(&app).await
+}
+
+/// 用户框选完成：坐标为全局逻辑点（overlay CSS 像素）。
+#[tauri::command]
+pub async fn perform_ocr_translation(
+    app: tauri::AppHandle,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), AppError> {
+    if width < 8.0 || height < 8.0 {
+        return Err(AppError::InvalidInput("selection is too small".to_string()));
+    }
+    crate::ocr::run_ocr_pipeline(
+        app,
+        lingua_core::Rect {
+            x,
+            y,
+            width,
+            height,
+        },
+    )
+    .await;
+    Ok(())
+}
+
+/// 取消选区（Esc）。
+#[tauri::command]
+pub async fn cancel_ocr(app: tauri::AppHandle) -> Result<(), AppError> {
+    crate::ocr::hide_overlay(&app)
+}
+
+/// 屏幕录制权限状态。
+#[tauri::command]
+pub async fn screen_recording_status() -> Result<bool, AppError> {
+    Ok(lingua_platform::screen_recording_granted())
 }

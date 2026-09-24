@@ -10,6 +10,7 @@
 pub mod dictionary;
 pub mod error;
 pub mod language;
+pub mod ocr;
 pub mod selection;
 pub mod translation;
 pub mod vocabulary;
@@ -17,6 +18,7 @@ pub mod vocabulary;
 pub use dictionary::{DictionaryDefinition, DictionaryEntry};
 pub use error::{AppError, AppResult};
 pub use language::Language;
+pub use ocr::{OcrBlock, OcrImage, OcrLine, OcrResult};
 pub use selection::{Rect, SelectedText, SelectionSource};
 pub use translation::{
     TextKind, TranslationMode, TranslationRequest, TranslationResult, classify_text,

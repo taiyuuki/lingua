@@ -161,6 +161,15 @@ pub fn read_route_provider(database: &Database, key: &str) -> Option<String> {
         .and_then(|value| value.as_str().map(str::to_string))
 }
 
+/// 通用 settings 读取（字符串值；不存在返回 None）。
+pub fn read_setting(database: &Database, key: &str) -> Option<String> {
+    database
+        .get_setting(key)
+        .ok()
+        .flatten()
+        .and_then(|value| value.as_str().map(str::to_string))
+}
+
 pub fn read_target_language_code(database: &Database) -> String {
     database
         .get_setting(SETTINGS_TARGET_LANGUAGE)
@@ -179,7 +188,7 @@ pub fn read_shortcut(database: &Database) -> String {
         .unwrap_or_else(|| DEFAULT_SHORTCUT.to_string())
 }
 
-fn target_language(database: &Database) -> AppResult<Language> {
+pub fn target_language(database: &Database) -> AppResult<Language> {
     Ok(Language::parse(&read_target_language_code(database)))
 }
 

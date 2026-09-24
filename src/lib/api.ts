@@ -57,6 +57,9 @@ export interface AppSettingsDto {
   translateProviderId: string | null;
   targetLanguage: string;
   shortcut: string;
+  ocrProvider: string;
+  ocrTesseractPath: string;
+  ocrHttpUrl: string;
 }
 
 export interface TestProviderResult {
@@ -175,6 +178,27 @@ export async function saveAppSettings(settings: AppSettingsDto): Promise<void> {
 
 export async function selectionPermissionStatus(): Promise<boolean> {
   return invoke<boolean>("selection_permission_status");
+}
+
+export async function screenRecordingStatus(): Promise<boolean> {
+  return invoke<boolean>("screen_recording_status");
+}
+
+export async function startOcrCapture(): Promise<void> {
+  await invoke("start_ocr_capture");
+}
+
+export async function performOcrTranslation(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<void> {
+  await invoke("perform_ocr_translation", { x, y, width, height });
+}
+
+export async function cancelOcr(): Promise<void> {
+  await invoke("cancel_ocr");
 }
 
 export async function listDictionaries(): Promise<DictionaryInfoDto[]> {

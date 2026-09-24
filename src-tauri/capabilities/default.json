@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Lingua 窗口的默认能力：main 与 popup",
-  "windows": ["main", "popup"],
+  "windows": ["main", "popup", "ocr-selection"],
   "permissions": ["core:default"]
 }
