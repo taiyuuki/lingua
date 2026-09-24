@@ -19,10 +19,13 @@ use lingua_database::Database;
 use lingua_ocr::{HttpOcrProvider, OcrProvider, TesseractOcrProvider};
 use lingua_translation::TranslationEngine;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 /// OCR 选区窗口的固定 label（capabilities 里需放行）。
 pub const OVERLAY_LABEL: &str = "ocr-selection";
+/// 会话更新通知：overlay 收到后重新拉取背景截图。
+/// 窗口是复用的（Vue 只挂载一次），所以每次 start 都要推一次。
+pub const BACKGROUND_UPDATED_EVENT: &str = "ocr://background-updated";
 
 /// settings 表键名。
 pub const SETTINGS_OCR_PROVIDER: &str = "ocr.provider";
@@ -140,6 +143,11 @@ pub async fn start_capture(app: &AppHandle) -> AppResult<()> {
             logical_height: monitor_rect.height,
         });
     }
+
+    // 通知 overlay 拉取新背景。窗口隐藏时 webview 仍然存活、能收事件；
+    // 放在 show 之前，尽量让新图在窗口可见前就位。
+    app.emit_to(OVERLAY_LABEL, BACKGROUND_UPDATED_EVENT, ())
+        .map_err(platform_error)?;
 
     show_overlay(app).await
 }

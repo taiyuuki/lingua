@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
-import { cancelOcr, getOcrBackground, performOcrTranslation } from "../lib/api";
+import {
+  cancelOcr,
+  getOcrBackground,
+  onOcrBackgroundUpdated,
+  performOcrTranslation,
+} from "../lib/api";
 
 // 快照式选区：整屏截图由后端在 start_ocr_capture 时截好，
 // 这里把截图铺满窗口作为背景，用户在「冻结的屏幕」上框选。
@@ -16,6 +21,17 @@ const background = ref<string | null>(null);
 const dragStart = reactive({ x: 0, y: 0 });
 const rect = reactive<Rect>({ x: 0, y: 0, width: 0, height: 0 });
 const dragging = ref(false);
+let unlisten: (() => void) | null = null;
+
+// 窗口是复用的：每次 start_ocr_capture 后端会发通知，这里重新拉取，
+// 保证背景始终是最新一次的截图。
+async function refreshBackground(): Promise<void> {
+  try {
+    background.value = await getOcrBackground();
+  } catch {
+    background.value = null;
+  }
+}
 
 const rectStyle = computed(() => ({
   left: `${Math.min(rect.x, rect.x + rect.width)}px`,
@@ -71,11 +87,13 @@ onMounted(async () => {
   window.addEventListener("mousemove", onMouseMove);
   window.addEventListener("mouseup", onMouseUp);
   window.addEventListener("keydown", onKeyDown);
-  try {
-    background.value = await getOcrBackground();
-  } catch {
+  const stop = await onOcrBackgroundUpdated(() => {
+    // 先清旧图：宁可短暂黑屏，也不能在旧截图上框选。
     background.value = null;
-  }
+    void refreshBackground();
+  });
+  unlisten = stop;
+  await refreshBackground();
 });
 
 onUnmounted(() => {
@@ -83,6 +101,7 @@ onUnmounted(() => {
   window.removeEventListener("mousemove", onMouseMove);
   window.removeEventListener("mouseup", onMouseUp);
   window.removeEventListener("keydown", onKeyDown);
+  unlisten?.();
 });
 </script>
 

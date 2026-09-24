@@ -192,6 +192,11 @@ export async function getOcrBackground(): Promise<string | null> {
   return invoke<string | null>("get_ocr_background");
 }
 
+/** OCR 会话更新通知（每次开始截图都会触发）。返回取消订阅函数。 */
+export function onOcrBackgroundUpdated(handler: () => void): Promise<() => void> {
+  return listen("ocr://background-updated", () => handler());
+}
+
 export async function performOcrTranslation(
   x: number,
   y: number,
