@@ -11,13 +11,17 @@ use std::time::Duration;
 /// Provider 协议族。本地服务（Ollama / LM Studio / llama.cpp server）
 /// 兼容 OpenAI 协议，通过 `ProviderKind::OpenAiCompatible` + 自定义
 /// `base_url` 接入，不需要单独的 Kind。
+///
+/// 序列化用显式 rename：`snake_case` 会把 `OpenAiCompatible` 拆成
+/// `open_ai_compatible`，与前端/DAO 约定的 `openai_compatible` 不一致。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
     /// 任何实现了 OpenAI `/chat/completions` 协议的服务（含本地）。
     #[default]
+    #[serde(rename = "openai_compatible")]
     OpenAiCompatible,
     /// OpenAI 官方 API（当前与 compatible 共用实现，保留枚举便于未来分化）。
+    #[serde(rename = "openai")]
     OpenAi,
 }
 
@@ -94,6 +98,22 @@ mod tests {
         let back: ProviderConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.id, "deepseek");
         assert_eq!(back.api_key, None);
+    }
+
+    #[test]
+    fn kind_serialization_matches_cross_language_contract() {
+        // 前端 TS 类型与 providers 表都使用这两个字符串，不允许漂移。
+        assert_eq!(
+            serde_json::to_value(ProviderKind::OpenAiCompatible).unwrap(),
+            "openai_compatible"
+        );
+        assert_eq!(
+            serde_json::to_value(ProviderKind::OpenAi).unwrap(),
+            "openai"
+        );
+        let back: ProviderKind =
+            serde_json::from_value(serde_json::json!("openai_compatible")).unwrap();
+        assert_eq!(back, ProviderKind::OpenAiCompatible);
     }
 
     #[test]

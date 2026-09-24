@@ -10,7 +10,7 @@
     "typecheck": "vue-tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri:dev": "tauri dev"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
