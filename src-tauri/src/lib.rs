@@ -94,36 +94,78 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::perform_ocr_translation,
             commands::cancel_ocr,
             commands::screen_recording_status,
+            commands::ocr_retry_available,
+            commands::retry_ocr_with_vision,
+            commands::ocr_source_info,
         ])
         .run(tauri::generate_context!())?;
     Ok(())
 }
 
-/// 重新注册全局快捷键（设置变更时也会调用）。
+/// 重新注册全局快捷键（设置变更时也会调用）：
+/// 划词翻译（默认 `alt+t`）与截图翻译（默认 `alt+s`，跟随光标所在
+/// 显示器，多屏截图的主要入口）。两者相同（或截图快捷键非法）时
+/// 截图快捷键让路，只告警不失败——划词是核心路径。
 pub fn register_shortcut_from_settings(
     app: &tauri::AppHandle,
     database: &Database,
 ) -> lingua_core::AppResult<()> {
-    let shortcut_string = pipeline::read_shortcut(database);
-    let shortcut: Shortcut = shortcut_string.parse().map_err(|error| {
-        AppError::InvalidInput(format!("invalid shortcut `{shortcut_string}`: {error}"))
-    })?;
-
     let global_shortcut = app.global_shortcut();
     if let Err(error) = global_shortcut.unregister_all() {
         tracing::debug!(error = %error, "unregister_all reported an error (may be none registered)");
     }
-    global_shortcut
-        .on_shortcut(shortcut, shortcut_handler)
-        .map_err(|error| AppError::Platform(error.to_string()))?;
-    tracing::info!(shortcut = %shortcut_string, "global shortcut registered");
+
+    let translate_shortcut = pipeline::read_shortcut(database);
+    register_shortcut(app, &translate_shortcut, translate_shortcut_handler)?;
+
+    let ocr_shortcut = pipeline::read_ocr_shortcut(database);
+    if ocr_shortcut == translate_shortcut {
+        tracing::warn!(
+            shortcut = %ocr_shortcut,
+            "ocr shortcut conflicts with translate shortcut; ignoring"
+        );
+        return Ok(());
+    }
+    register_shortcut(app, &ocr_shortcut, ocr_shortcut_handler)
+}
+
+/// 解析并注册单个快捷键。
+fn register_shortcut<F>(
+    app: &tauri::AppHandle,
+    shortcut_string: &str,
+    handler: F,
+) -> lingua_core::AppResult<()>
+where
+    F: Fn(&tauri::AppHandle, &Shortcut, ShortcutEvent) + Send + Sync + 'static,
+{
+    let shortcut: Shortcut = shortcut_string.parse().map_err(|error| {
+        lingua_core::AppError::InvalidInput(format!(
+            "invalid shortcut `{shortcut_string}`: {error}"
+        ))
+    })?;
+    app.global_shortcut()
+        .on_shortcut(shortcut, handler)
+        .map_err(|error| lingua_core::AppError::Platform(error.to_string()))?;
+    tracing::info!(shortcut = shortcut_string, "global shortcut registered");
     Ok(())
 }
 
-/// 全局快捷键回调：按下即触发一次完整翻译 pipeline。
-fn shortcut_handler(app: &tauri::AppHandle, _shortcut: &Shortcut, event: ShortcutEvent) {
+/// 划词快捷键：按下即触发一次完整翻译 pipeline。
+fn translate_shortcut_handler(app: &tauri::AppHandle, _shortcut: &Shortcut, event: ShortcutEvent) {
     if event.state == ShortcutState::Pressed {
         tauri::async_runtime::spawn(pipeline::run_translation_pipeline(app.clone()));
+    }
+}
+
+/// 截图快捷键：按下即截光标所在显示器并显示选区 overlay。
+fn ocr_shortcut_handler(app: &tauri::AppHandle, _shortcut: &Shortcut, event: ShortcutEvent) {
+    if event.state == ShortcutState::Pressed {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = ocr::start_capture(&app).await {
+                tracing::warn!(error = %error, "ocr capture failed to start");
+            }
+        });
     }
 }
 

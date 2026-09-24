@@ -47,6 +47,10 @@ export interface ProviderDto {
   model: string | null;
   organization: string | null;
   timeoutSecs: number;
+  /** 能力声明；Vision 任务（OCR 兜底）只派给 canVision 的 Provider。 */
+  canChat: boolean;
+  canTranslate: boolean;
+  canVision: boolean;
   /** 厂商扩展参数（JSON 对象文本），逐键合并进请求体。 */
   extraBody: string | null;
   apiKey: string | null;
@@ -57,8 +61,11 @@ export interface ProviderDto {
 export interface AppSettingsDto {
   defaultProviderId: string | null;
   translateProviderId: string | null;
+  visionProviderId: string | null;
   targetLanguage: string;
   shortcut: string;
+  /** 截图翻译快捷键（默认 alt+s；多显示器下跟随光标所在屏）。 */
+  ocrShortcut: string;
   /** 界面主题：light | dark（主窗口与 Popup 共用）。 */
   uiTheme: string;
   ocrProvider: string;
@@ -261,6 +268,30 @@ export async function performOcrTranslation(
 
 export async function cancelOcr(): Promise<void> {
   await invoke("cancel_ocr");
+}
+
+/** 上一次结果是否来自截图翻译且可用 Vision 手动重新识别。 */
+export async function ocrRetryAvailable(): Promise<boolean> {
+  return invoke<boolean>("ocr_retry_available");
+}
+
+/** 对保留的选区截图用 Vision 重新识别并重走翻译。 */
+export async function retryOcrWithVision(): Promise<void> {
+  await invoke("retry_ocr_with_vision");
+}
+
+/** 识别来源：哪个引擎产出文本、是否经过 Vision、置信度、兜底未生效原因。 */
+export interface OcrSourceInfo {
+  /** 如 tesseract-cli / http / vision:provider-id。 */
+  engine: string;
+  via: "primary" | "auto" | "manual";
+  confidence: number | null;
+  visionNote: string | null;
+}
+
+/** 最近一次截图翻译的识别来源；划词翻译结果为 null。 */
+export async function ocrSourceInfo(): Promise<OcrSourceInfo | null> {
+  return invoke<OcrSourceInfo | null>("ocr_source_info");
 }
 
 export async function listDictionaries(): Promise<DictionaryInfoDto[]> {

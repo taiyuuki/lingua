@@ -37,12 +37,32 @@ pub struct OcrSession {
     pub logical_height: f64,
 }
 
+/// 一次截图翻译的识别来源（Popup 展示用）：最终产出文本的引擎、
+/// 走的路径（primary 直出 / auto Vision 自动兜底 / manual 手动重识）、
+/// 块平均置信度，以及 Vision 兜底尝试过但回退原始结果的原因。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrSourceInfo {
+    /// 如 `tesseract-cli` / `http` / `vision:<provider-id>`。
+    pub engine: String,
+    pub via: String,
+    /// 0..1；Vision 无几何数据时 `None`。
+    pub confidence: Option<f32>,
+    pub vision_note: Option<String>,
+}
+
 /// 通过 `app.manage` 注入、commands 里以 `State<AppState>` 取用。
 pub struct AppState {
     pub database: Database,
     pub selection: SelectionService,
     pub popup_state: Mutex<Option<PopupState>>,
     pub ocr: Mutex<Option<OcrSession>>,
+    /// OCR 翻译保留的选区截图，供「用 Vision 重新识别」手动重试
+    /// （tesseract 常见故障是高置信度的错，自动兜底触发不了）；
+    /// 新的 OCR 会话替换、划词翻译触发时清除。
+    pub ocr_retry: Mutex<Option<OcrImage>>,
+    /// 最近一次截图翻译的识别来源；划词翻译触发时清除。
+    pub ocr_source: Mutex<Option<OcrSourceInfo>>,
 }
 
 impl AppState {
@@ -52,6 +72,8 @@ impl AppState {
             selection,
             popup_state: Mutex::new(None),
             ocr: Mutex::new(None),
+            ocr_retry: Mutex::new(None),
+            ocr_source: Mutex::new(None),
         }
     }
 }

@@ -42,9 +42,13 @@ lingua/
 2. 在任意应用中选中文本，按 `alt+t`（可在设置里改）。
 3. 翻译结果在光标所在屏幕居中的 Popup 中显示（多显示器跟随光标）；
    `Esc` 或点击外部关闭。
-4. 主窗口「截图翻译」按钮 → 在屏幕上拖拽框选 → 识别的文字自动走
-   AI 翻译并在 Popup 显示。OCR 引擎在「路由与快捷键」里配置
-   （默认本机 tesseract；PaddleOCR 走 `scripts/paddleocr_server.py` sidecar）。
+4. 按 `alt+s`（可在设置里改）或点主窗口「截图翻译」按钮 → 在屏幕上
+   拖拽框选 → 识别的文字自动走 AI 翻译并在 Popup 显示。快捷键入口
+   截**光标所在**显示器（多屏幕用这个），按钮入口截主窗口所在屏。
+   OCR 引擎在「路由与快捷键」里配置（默认本机 tesseract；PaddleOCR
+   走 `scripts/paddleocr_server.py` sidecar，部署见 docs/PADDLEOCR.md）。
+   识别为空或置信度偏低时，若配置了开启「视觉」能力的 Provider 会
+   自动用它重新识别兜底；Popup 工具栏也可手动「用 Vision 重新识别」。
 5. （可选）在「词典」卡片导入 TSV 词典：翻译单词时优先命中本地词典，
    Popup 显示词性、释义、例句。格式说明见导入表单内的提示。
 6. macOS 首次使用需在「系统设置 → 隐私与安全性 → 辅助功能」授权本应用

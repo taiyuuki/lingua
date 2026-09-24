@@ -80,6 +80,14 @@ pub struct ProviderDto {
     pub model: Option<String>,
     pub organization: Option<String>,
     pub timeout_secs: u64,
+    /// 能力声明（对话 / 翻译 / 视觉）；Router 的 Vision 任务只派给
+    /// `can_vision == true` 的 Provider。
+    #[serde(default = "default_true")]
+    pub can_chat: bool,
+    #[serde(default = "default_true")]
+    pub can_translate: bool,
+    #[serde(default)]
+    pub can_vision: bool,
     /// 厂商扩展参数（JSON 对象文本）；保存时校验必须是合法 JSON 对象。
     #[serde(default)]
     pub extra_body: Option<String>,
@@ -87,6 +95,12 @@ pub struct ProviderDto {
     pub api_key: Option<String>,
     #[serde(default)]
     pub has_api_key: bool,
+}
+
+/// bool 字段的 serde 缺省：保持旧客户端不传能力字段时的历史行为
+/// （chat / translate 默认开启）。
+fn default_true() -> bool {
+    true
 }
 
 impl ProviderDto {
@@ -99,6 +113,9 @@ impl ProviderDto {
             model: record.model,
             organization: record.organization,
             timeout_secs: record.timeout_secs,
+            can_chat: record.can_chat,
+            can_translate: record.can_translate,
+            can_vision: record.can_vision,
             extra_body: record.extra_body,
             api_key: None,
             has_api_key,
@@ -119,9 +136,9 @@ impl ProviderDto {
                 .map(str::to_string),
             organization: self.organization.clone(),
             timeout_secs: self.timeout_secs,
-            can_chat: true,
-            can_translate: true,
-            can_vision: false,
+            can_chat: self.can_chat,
+            can_translate: self.can_translate,
+            can_vision: self.can_vision,
             extra_body: normalized_extra_body(self.extra_body.as_deref())?,
             api_key_ref: Some(SecretRef::provider(self.id.trim()).account),
         })
@@ -234,6 +251,11 @@ pub async fn delete_provider(
         {
             database.remove_setting(pipeline::SETTINGS_ROUTE_TRANSLATE)?;
         }
+        if pipeline::read_route_provider(&database, pipeline::SETTINGS_ROUTE_VISION).as_deref()
+            == Some(id.as_str())
+        {
+            database.remove_setting(pipeline::SETTINGS_ROUTE_VISION)?;
+        }
         Ok(())
     })
     .await
@@ -306,9 +328,13 @@ pub struct AppSettingsDto {
     pub default_provider_id: Option<String>,
     /// 翻译任务路由（`None` = 跟随默认 Provider）。
     pub translate_provider_id: Option<String>,
+    /// Vision 任务路由（`None` = 自动挑选任一 vision 能力 Provider）。
+    pub vision_provider_id: Option<String>,
     /// 划词翻译的目标语言（BCP-47 基础码）。
     pub target_language: Language,
     pub shortcut: String,
+    /// 截图翻译快捷键（默认 alt+s；多显示器下跟随光标所在屏）。
+    pub ocr_shortcut: String,
     /// 界面主题：light | dark。
     pub ui_theme: String,
     /// OCR 引擎：`tesseract` | `http`。
@@ -329,8 +355,13 @@ pub async fn get_app_settings(
                 &database,
                 pipeline::SETTINGS_ROUTE_TRANSLATE,
             ),
+            vision_provider_id: pipeline::read_route_provider(
+                &database,
+                pipeline::SETTINGS_ROUTE_VISION,
+            ),
             target_language: Language::parse(&pipeline::read_target_language_code(&database)),
             shortcut: pipeline::read_shortcut(&database),
+            ocr_shortcut: pipeline::read_ocr_shortcut(&database),
             ui_theme: pipeline::read_ui_theme(&database),
             ocr_provider: pipeline::read_setting(&database, crate::ocr::SETTINGS_OCR_PROVIDER)
                 .unwrap_or_else(|| crate::ocr::OCR_PROVIDER_TESSERACT.to_string()),
@@ -372,6 +403,14 @@ pub async fn save_app_settings(
                 database.set_setting(pipeline::SETTINGS_ROUTE_TRANSLATE, &serde_json::json!(id))?
             }
         }
+        match settings.vision_provider_id.as_deref() {
+            None => {
+                database.remove_setting(pipeline::SETTINGS_ROUTE_VISION)?;
+            }
+            Some(id) => {
+                database.set_setting(pipeline::SETTINGS_ROUTE_VISION, &serde_json::json!(id))?
+            }
+        }
         database.set_setting(
             pipeline::SETTINGS_UI_THEME,
             &serde_json::json!(settings.ui_theme),
@@ -395,6 +434,10 @@ pub async fn save_app_settings(
         database.set_setting(
             pipeline::SETTINGS_SHORTCUT,
             &serde_json::json!(settings.shortcut),
+        )?;
+        database.set_setting(
+            pipeline::SETTINGS_SHORTCUT_OCR,
+            &serde_json::json!(settings.ocr_shortcut),
         )?;
         Ok(())
     })
@@ -769,4 +812,48 @@ pub async fn cancel_ocr(app: tauri::AppHandle) -> Result<(), AppError> {
 #[tauri::command]
 pub async fn screen_recording_status() -> Result<bool, AppError> {
     Ok(lingua_platform::screen_recording_granted())
+}
+
+/// 当前是否可以「用 Vision 重新识别」：保留了选区截图
+/// （上一次结果来自截图翻译）且存在开启视觉能力的 Provider。
+#[tauri::command]
+pub async fn ocr_retry_available(state: tauri::State<'_, AppState>) -> Result<bool, AppError> {
+    let database = state.database.clone();
+    let has_capture = state
+        .ocr_retry
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false);
+    if !has_capture {
+        return Ok(false);
+    }
+    let vision_capable = tauri::async_runtime::spawn_blocking(move || {
+        database
+            .list_providers()
+            .map(|records| records.iter().any(|record| record.can_vision))
+            .unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false);
+    Ok(vision_capable)
+}
+
+/// 手动「用 Vision 重新识别」：对保留的选区截图直接走 Vision 并重翻译。
+#[tauri::command]
+pub async fn retry_ocr_with_vision(app: tauri::AppHandle) -> Result<(), AppError> {
+    crate::ocr::run_vision_retry(app).await;
+    Ok(())
+}
+
+/// 最近一次截图翻译的识别来源（引擎 / 路径 / 置信度 / 兜底说明）；
+/// 划词翻译结果为 `None`。用于区分「识别错了」和「Vision 没触发」。
+#[tauri::command]
+pub async fn ocr_source_info(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<crate::state::OcrSourceInfo>, AppError> {
+    Ok(state
+        .ocr_source
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or(None))
 }

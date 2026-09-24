@@ -30,9 +30,10 @@ OS / Network / SQLite / Models
 |-------|------|------|
 | `lingua-core` | 领域模型：`AppError`（含 `NoSelection`）、`Language`、`SelectedText`、`TranslationRequest/Result`，IPC 序列化契约（camelCase） | ✅ Phase 0/1 |
 | `lingua-platform` | `SelectionProvider` + `SelectionService`；macOS 实现（AX 选区 + 剪贴板 fallback + 光标/截图：`screencapture` CLI + 屏幕录制权限 FFI）；Windows 实现（UI Automation TextPattern 选区 + 剪贴板 fallback（SendInput Ctrl+C）+ 光标（GetCursorPos + 显示器 DPI 换算）+ GDI 截图）；Linux 明确占位 | ✅ macOS Phase 1/5、Windows |
-| `lingua-ai` | `AIProvider` trait、`OpenAiCompatibleProvider`（reqwest/rustls）、`AIRouter`（AiTask → Provider 路由 + 默认回退）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1/2 |
+| `lingua-ai` | `AIProvider` trait（含 `vision`）、`OpenAiCompatibleProvider`（reqwest/rustls；chat/SSE/多模态 image_url）、`AIRouter`（AiTask → Provider 路由 + 默认回退 + Vision 能力分派）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1/2/6 |
 | `lingua-translation` | Translation Engine：单词 → 词典优先（释义语言须匹配目标语言），未命中/短语/句子 → AI；`prompts/translate/` 模板内嵌；AI JSON 解析失败优雅降级 | ✅ Phase 1/3 |
 | `lingua-dictionary` | `DictionaryProvider` trait、SQLite 词典实现、TSV 导入器（CC-CEDICT 等公开词典可先转 TSV 再导入） | ✅ Phase 3 |
+| `lingua-ocr` | `OcrProvider` trait、Tesseract CLI 实现、HTTP sidecar 实现（PaddleOCR 契约）、`VisionOcrProvider`（vision 能力 AIProvider 的高级 fallback，输出复用 `OcrResult`） | ✅ Phase 5/6 |
 | `lingua-database` | SQLite（rusqlite bundled）、migration runner、settings KV、providers / dictionaries / vocabulary 表 DAO | ✅ Phase 0/1/3/4 |
 | `lingua-secrets` | `SecretStore` trait + keyring 实现（macOS Keychain / Windows Credential Manager / Linux Secret Service）；API Key 明文只存在这里 | ✅ Phase 1 |
 | `lingua` (src-tauri) | Tauri 壳：commands、全局快捷键、翻译 pipeline（经 Router）、Popup、Provider 管理/连接测试/应用设置命令 | ✅ Phase 1/2 |
@@ -71,7 +72,7 @@ crate 没有任何可约束的实现细节，过早建立只会产生错误的�
 ## 3.5 Phase 1 完整链路
 
 ```
-全局快捷键 (alt+t，settings 可配)
+全局快捷键（划词 alt+t / 截图 alt+s，settings 可配）
     ↓ tauri-plugin-global-shortcut（Rust 侧注册，无需前端权限）
 pipeline::run_translation_pipeline
     ↓ 1. SelectionService.capture_first()
@@ -146,8 +147,8 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
    默认 Provider / 翻译任务路由（存 settings 表）、删除时自动清理密钥与路由。
 2. 流式输出（SSE）未做：长文本翻译期间 Popup 只有加载态，随 Phase 3+ 落地。
 3. Prompt 自定义入口未做（内置模板结构已就绪，覆盖逻辑留到词典/学习阶段一起）。
-4. 路由粒度目前只有 Translate 一个任务；Vision（Phase 6）/学习分析（Phase 9）
-   接入时在 `AiTask` 枚举上扩展即可。
+4. 路由粒度：Translate 与 Vision 两个任务（Phase 6 起）；学习分析
+   （Phase 9）接入时在 `AiTask` 枚举上继续扩展。
 
 
 ## 8. Phase 3 已知限制
@@ -199,21 +200,39 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
 3. Tesseract 中文识别需额外语言包（`brew install tesseract-lang`），
    且 Phase 5 未传 `-l` 语言参数（自动检测由翻译端处理）。
 4. PaddleOCR 以 sidecar 形式接入（`scripts/paddleocr_server.py`，
-   需自行安装 paddleocr/paddlepaddle）；ONNX 内嵌推理未做。
+   需自行安装 paddleocr/paddlepaddle；部署文档见 `docs/PADDLEOCR.md`）；
+   ONNX 内嵌推理未做。
 5. 图片预处理（二值化/放大）为空操作；「OCR → 原位置覆盖翻译」
    依赖的 bbox 数据已保留，实现留到后续阶段。
 6. 多显示器：快照与 overlay 均跟随光标所在显示器（截图与选区坐标
    同屏对齐，混合 DPI 也不串屏）；跨多屏拼接成一张大截图未做；
-   `ocr_history` 留到 Phase 8。
+   `ocr_history` 留到 Phase 8。截图入口默认 `alt+s` 全局快捷键
+   （主窗口按钮入口的光标必然在主窗口所在屏，只能截那一块）。
 
-## 10. Phase 6 待办（下一步）
+## 10. Phase 6：Vision AI（视觉大模型识别）
 
-按原规划进入 **Vision AI（视觉大模型识别）**：
+已完成（真机验证待做）：
 
-1. `AiTask::Vision` 路由 + Provider capabilities.vision 分派
-   （OpenAI-compatible 的 `image_url` base64 消息格式）。
-2. OCR 后处理兜底：低置信度 / 空结果时提示「用 Vision 重新识别」；
-   Vision 结果仍输出结构化 blocks（复用 `OcrResult` 契约）。
-3. 设置里为 Vision 任务单独指定 Provider。
-4. `scripts/paddleocr_server.py` 的部署文档化。
-（注：Vision LLM 不替代普通 OCR，只做高级 fallback —— 需求原话。）
+1. `AiTask::Vision` 路由 + Provider capabilities.vision 分派：路由 /
+   默认 Provider 不具备视觉能力时自动改派任一有能力的 Provider；
+   OpenAI-compatible 实现走 `image_url` base64 多模态消息
+   （`extra_body` 照常合并）。
+2. OCR 后处理兜底：**自动**——空结果或块平均置信度 < 0.6 时经 Router
+   派给 Vision 重识别；**手动**——Popup 工具栏「用 Vision 重新识别」
+   按钮（tesseract 常见故障是高置信度的错，自动阈值触发不了），
+   对保留的选区截图（`AppState.ocr_retry`，划词触发时清除）直接走
+   Vision 并重翻译。Vision 失败/为空**不阻断**，回退原始结果。
+   **可观测性**：识别来源（引擎 / 路径 / 置信度 / 兜底未生效原因，
+   `AppState.ocr_source`）在 Popup 结果态以标签展示，用于区分
+   「识别错了」与「Vision 没触发」。
+   输出复用 `OcrResult` 契约——bbox 置零、置信度 0，不伪造几何数据；
+   严格 JSON（text/language）解析失败降级纯文本。
+3. 设置里为 Vision 任务单独指定 Provider（「视觉识别 Provider」，
+   未设置 = 自动挑选）；Provider 表单新增能力勾选（对话/翻译/视觉）。
+4. `scripts/paddleocr_server.py` 部署文档化（`docs/PADDLEOCR.md`）。
+
+（定位：Vision LLM 不替代普通 OCR，只做高级 fallback —— 需求原话。）
+
+后续候选（按需排）：Phase 9 学习分析、词典导入文件选择器
+（`tauri-plugin-dialog`）、Windows 打包（nsis/msi + 图标）、
+托盘与自启（Phase 10）、SRS 复习（Phase 9）。

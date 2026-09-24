@@ -7,13 +7,17 @@ import {
   isWord,
   latestPopupState,
   latestStreamed,
+  ocrRetryAvailable,
+  ocrSourceInfo,
   onPopupDelta,
   onPopupState,
   onThemeChanged,
   removeVocabularyWord,
+  retryOcrWithVision,
   saveToVocabulary,
   togglePopupPin,
   vocabularyWordStatus,
+  type OcrSourceInfo,
   type PopupState,
 } from "../lib/api";
 import { applyTheme, normalizeTheme } from "../lib/theme";
@@ -30,6 +34,10 @@ const pinned = ref(true);
 const starVisible = ref(false);
 const saved = ref(false);
 const favoriteWord = reactive({ word: "", language: null as string | null });
+// 「用 Vision 重新识别」：仅截图翻译的结果且配置了视觉 Provider 时可用。
+const visionRetryAvailable = ref(false);
+// 识别来源：让用户能区分「识别错了」和「Vision 根本没触发」。
+const ocrSource = ref<OcrSourceInfo | null>(null);
 let unlisten: (() => void) | null = null;
 let unlistenTheme: (() => void) | null = null;
 let unlistenDelta: (() => void) | null = null;
@@ -111,6 +119,55 @@ async function evaluateFavorite(): Promise<void> {
   }
 }
 
+/** 刷新「用 Vision 重新识别」可用性（截图翻译保留的截图 + 视觉 Provider）。 */
+async function refreshVisionRetry(): Promise<void> {
+  try {
+    visionRetryAvailable.value = await ocrRetryAvailable();
+  } catch {
+    visionRetryAvailable.value = false;
+  }
+}
+
+/** 刷新识别来源标签（划词翻译为 null，不显示）。 */
+async function refreshOcrSource(): Promise<void> {
+  try {
+    ocrSource.value = await ocrSourceInfo();
+  } catch {
+    ocrSource.value = null;
+  }
+}
+
+const ocrSourceLabel = computed(() => {
+  const source = ocrSource.value;
+  if (!source) {
+    return "";
+  }
+  const parts: string[] = [];
+  if (source.engine.startsWith("vision:")) {
+    parts.push(
+      source.via === "manual" ? "Vision 手动重识" : "Vision 自动兜底",
+    );
+  } else {
+    parts.push(source.engine);
+    if (source.confidence !== null) {
+      parts.push(`置信度 ${(source.confidence * 100).toFixed(0)}%`);
+    }
+    if (source.visionNote) {
+      parts.push(source.visionNote);
+    }
+  }
+  return `识别：${parts.join(" · ")}`;
+});
+
+async function retryWithVision(): Promise<void> {
+  // 失败以 popup 错误态呈现，这里静默。
+  try {
+    await retryOcrWithVision();
+  } catch {
+    // ignore
+  }
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
     void hidePopup();
@@ -137,6 +194,8 @@ onMounted(async () => {
     copiedSource.value = false;
     copiedTranslation.value = false;
     void evaluateFavorite();
+    void refreshVisionRetry();
+    void refreshOcrSource();
   });
   unlisten = stop;
   unlistenDelta = stopDelta;
@@ -146,6 +205,9 @@ onMounted(async () => {
   }
   // 追平：挂载期间可能已漏掉若干 delta 事件
   streamed.text = await latestStreamed();
+  void evaluateFavorite();
+  void refreshVisionRetry();
+  void refreshOcrSource();
 });
 
 onUnmounted(() => {
@@ -202,6 +264,29 @@ function onToolbarMouseDown(event: MouseEvent): void {
       <div class="tool-spacer" />
 
       <template v-if="state.status === 'result'">
+        <button
+          v-if="visionRetryAvailable"
+          class="tool-btn"
+          type="button"
+          title="用 Vision 重新识别（tesseract 识别不对时）"
+          @click="retryWithVision"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle
+              cx="12"
+              cy="12"
+              r="3"
+            />
+          </svg>
+        </button>
         <button
           v-if="starVisible"
           class="tool-btn"
@@ -321,6 +406,11 @@ function onToolbarMouseDown(event: MouseEvent): void {
           v-if="detectedLanguageLabel"
           class="chip"
         >识别为 {{ detectedLanguageLabel }}</span>
+        <span
+          v-if="ocrSourceLabel"
+          class="chip"
+          :title="ocrSource?.visionNote ?? ''"
+        >{{ ocrSourceLabel }}</span>
       </div>
 
       <!-- 译文卡片 -->

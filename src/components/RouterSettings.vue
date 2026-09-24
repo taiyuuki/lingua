@@ -19,8 +19,10 @@ const settingsStore = useSettingsStore();
 const {
   defaultProviderId,
   translateProviderId,
+  visionProviderId,
   targetLanguage,
   shortcut,
+  ocrShortcut,
   uiTheme,
   ocrProvider,
   ocrTesseractPath,
@@ -33,6 +35,15 @@ const {
 const providerOptions = computed(() =>
   providersStore.providers.map((provider) => ({
     label: `${provider.name}（${provider.id}）`,
+    value: provider.id,
+  })),
+);
+
+// Vision 任务选项：标注哪些 Provider 开启了视觉能力（路由只对
+// 有能力的 Provider 生效，其余会被自动改派）。
+const visionProviderOptions = computed(() =>
+  providersStore.providers.map((provider) => ({
+    label: `${provider.name}（${provider.id}）${provider.canVision ? " · 视觉 ✓" : ""}`,
     value: provider.id,
   })),
 );
@@ -117,6 +128,16 @@ onMounted(() => {
               clearable
             />
           </n-form-item>
+          <n-form-item
+            label="视觉识别 Provider（OCR 兜底）"
+            style="flex: 1"
+          >
+            <n-select
+              v-model:value="visionProviderId"
+              :options="[{ label: '自动（任一视觉能力 Provider）', value: '' }, ...visionProviderOptions]"
+              clearable
+            />
+          </n-form-item>
         </n-space>
 
         <n-space :size="12">
@@ -130,12 +151,21 @@ onMounted(() => {
             />
           </n-form-item>
           <n-form-item
-            label="全局快捷键"
+            label="划词快捷键"
             style="flex: 1"
           >
             <n-input
               v-model:value="shortcut"
               placeholder="alt+t"
+            />
+          </n-form-item>
+          <n-form-item
+            label="截图快捷键（截光标所在屏幕）"
+            style="flex: 1"
+          >
+            <n-input
+              v-model:value="ocrShortcut"
+              placeholder="alt+s"
             />
           </n-form-item>
         </n-space>

@@ -5,6 +5,7 @@ import {
   NAlert,
   NButton,
   NCard,
+  NCheckbox,
   NEmpty,
   NForm,
   NFormItem,
@@ -260,6 +261,20 @@ function testResultText(id: string): string {
             />
           </n-form-item>
         </n-space>
+
+        <n-form-item label="能力（截图翻译的 Vision 兜底只派给开启「视觉」的 Provider）">
+          <n-space :size="16">
+            <n-checkbox v-model:checked="form.canChat">
+              对话
+            </n-checkbox>
+            <n-checkbox v-model:checked="form.canTranslate">
+              翻译
+            </n-checkbox>
+            <n-checkbox v-model:checked="form.canVision">
+              视觉
+            </n-checkbox>
+          </n-space>
+        </n-form-item>
 
         <n-space>
           <n-button

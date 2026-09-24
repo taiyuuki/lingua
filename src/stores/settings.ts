@@ -35,8 +35,10 @@ export const useSettingsStore = defineStore("settings", () => {
   // 表单副本
   const defaultProviderId = ref<string>("");
   const translateProviderId = ref<string>(""); // "" = 跟随默认
+  const visionProviderId = ref<string>(""); // "" = 自动挑选任一视觉能力 Provider
   const targetLanguage = ref("zh");
   const shortcut = ref("alt+t");
+  const ocrShortcut = ref("alt+s");
   const uiTheme = ref("dark");
   const ocrProvider = ref("tesseract");
   const ocrTesseractPath = ref("tesseract");
@@ -48,8 +50,10 @@ export const useSettingsStore = defineStore("settings", () => {
       const settings: AppSettingsDto = await getAppSettings();
       defaultProviderId.value = settings.defaultProviderId ?? "";
       translateProviderId.value = settings.translateProviderId ?? "";
+      visionProviderId.value = settings.visionProviderId ?? "";
       targetLanguage.value = settings.targetLanguage;
       shortcut.value = settings.shortcut;
+      ocrShortcut.value = settings.ocrShortcut;
       uiTheme.value = normalizeTheme(settings.uiTheme);
       applyTheme(uiTheme.value);
       ocrProvider.value = settings.ocrProvider;
@@ -74,8 +78,10 @@ export const useSettingsStore = defineStore("settings", () => {
       await saveAppSettings({
         defaultProviderId: defaultProviderId.value === "" ? null : defaultProviderId.value,
         translateProviderId: translateProviderId.value === "" ? null : translateProviderId.value,
+        visionProviderId: visionProviderId.value === "" ? null : visionProviderId.value,
         targetLanguage: targetLanguage.value,
         shortcut: shortcut.value.trim() || "alt+t",
+        ocrShortcut: ocrShortcut.value.trim() || "alt+s",
         uiTheme: uiTheme.value,
         ocrProvider: ocrProvider.value,
         ocrTesseractPath: ocrTesseractPath.value.trim() || "tesseract",
@@ -101,8 +107,10 @@ export const useSettingsStore = defineStore("settings", () => {
     permissionGranted,
     defaultProviderId,
     translateProviderId,
+    visionProviderId,
     targetLanguage,
     shortcut,
+    ocrShortcut,
     uiTheme,
     ocrProvider,
     ocrTesseractPath,

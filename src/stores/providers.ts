@@ -20,6 +20,9 @@ export interface ProviderForm {
   model: string;
   apiKeyInput: string;
   timeoutSecs: number;
+  canChat: boolean;
+  canTranslate: boolean;
+  canVision: boolean;
   extraBody: string;
 }
 
@@ -33,6 +36,9 @@ function emptyForm(): ProviderForm {
     model: "",
     apiKeyInput: "",
     timeoutSecs: 60,
+    canChat: true,
+    canTranslate: true,
+    canVision: false,
     extraBody: "",
   };
 }
@@ -80,6 +86,9 @@ export const useProvidersStore = defineStore("providers", () => {
       model: provider.model ?? "",
       apiKeyInput: "",
       timeoutSecs: provider.timeoutSecs,
+      canChat: provider.canChat,
+      canTranslate: provider.canTranslate,
+      canVision: provider.canVision,
       extraBody: provider.extraBody ?? "",
     });
     saveError.value = null;
@@ -101,6 +110,9 @@ export const useProvidersStore = defineStore("providers", () => {
         model: form.model.trim() || null,
         organization: null,
         timeoutSecs: Math.min(Math.max(Math.round(form.timeoutSecs) || 60, 5), 600),
+        canChat: form.canChat,
+        canTranslate: form.canTranslate,
+        canVision: form.canVision,
         extraBody: form.extraBody.trim() === "" ? null : form.extraBody.trim(),
         apiKey: form.apiKeyInput === "" ? null : form.apiKeyInput,
         hasApiKey: false,

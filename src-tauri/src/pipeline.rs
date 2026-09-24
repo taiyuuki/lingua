@@ -22,11 +22,14 @@ use tauri::{AppHandle, Emitter, Manager};
 /// settings 表中的键名（集中定义，避免散落字符串）。
 pub const SETTINGS_DEFAULT_PROVIDER: &str = "ai.default_provider_id";
 pub const SETTINGS_ROUTE_TRANSLATE: &str = "router.task.translate";
+pub const SETTINGS_ROUTE_VISION: &str = "router.task.vision";
 pub const SETTINGS_TARGET_LANGUAGE: &str = "translation.target_language";
 pub const SETTINGS_SHORTCUT: &str = "shortcut.translate";
+pub const SETTINGS_SHORTCUT_OCR: &str = "shortcut.ocr";
 pub const SETTINGS_UI_THEME: &str = "ui.theme";
 pub const DEFAULT_UI_THEME: &str = "dark";
 pub const DEFAULT_SHORTCUT: &str = "alt+t";
+pub const DEFAULT_OCR_SHORTCUT: &str = "alt+s";
 pub const DEFAULT_TARGET_LANGUAGE: &str = "zh";
 
 /// 完整流程；任何失败都以 popup 错误态呈现（用户可感知）。
@@ -45,6 +48,15 @@ pub async fn run_translation_pipeline(app: AppHandle) {
 
 async fn run(app: &AppHandle) -> AppResult<()> {
     let state = app.state::<AppState>();
+
+    // 划词翻译不是 OCR 来源：清掉「用 Vision 重新识别」的保留截图
+    // 与识别来源标签。
+    if let Ok(mut retry) = state.ocr_retry.lock() {
+        *retry = None;
+    }
+    if let Ok(mut source) = state.ocr_source.lock() {
+        *source = None;
+    }
 
     // 1. 抓选区（此时 popup 还没弹，聚焦元素仍是目标应用）。
     let selected = state.selection.capture_first().await?;
@@ -157,6 +169,15 @@ pub fn build_router(database: &Database) -> AppResult<AIRouter> {
         }
     }
 
+    // Vision 路由同样只在 Provider 存在时生效；能力校验由 Router 分派时做。
+    if let Some(vision_id) = read_route_provider(database, SETTINGS_ROUTE_VISION) {
+        if registered.contains(&vision_id) {
+            builder = builder.route(AiTask::Vision, vision_id);
+        } else {
+            tracing::warn!(provider = %vision_id, "vision route points to a missing provider; ignoring");
+        }
+    }
+
     Ok(builder.build())
 }
 
@@ -212,6 +233,17 @@ pub fn read_shortcut(database: &Database) -> String {
         .unwrap_or_else(|| DEFAULT_SHORTCUT.to_string())
 }
 
+/// 截图翻译快捷键（默认 alt+s）；按钮入口只能截主窗口所在屏，
+/// 快捷键入口跟随光标所在显示器。
+pub fn read_ocr_shortcut(database: &Database) -> String {
+    database
+        .get_setting(SETTINGS_SHORTCUT_OCR)
+        .ok()
+        .flatten()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| DEFAULT_OCR_SHORTCUT.to_string())
+}
+
 pub fn target_language(database: &Database) -> AppResult<Language> {
     Ok(Language::parse(&read_target_language_code(database)))
 }
@@ -252,6 +284,7 @@ mod tests {
         let database = empty_database();
         assert_eq!(read_default_provider_id(&database), None);
         assert_eq!(read_shortcut(&database), "alt+t");
+        assert_eq!(read_ocr_shortcut(&database), "alt+s");
         assert_eq!(target_language(&database).unwrap(), Language::Zh);
 
         let router = build_router(&database).unwrap();

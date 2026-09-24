@@ -97,6 +97,121 @@ pub fn build_ocr_provider(database: &Database) -> AppResult<Arc<dyn OcrProvider>
     }
 }
 
+/// 触发 Vision 兜底的块平均置信度阈值（tesseract/Paddle 的 conf 已归一到 0..1）。
+const VISION_FALLBACK_CONFIDENCE: f32 = 0.6;
+
+/// 块平均置信度；无块结构（部分 HTTP 引擎不返回块）时 `None`。
+fn mean_confidence(ocr: &OcrResult) -> Option<f32> {
+    if ocr.blocks.is_empty() {
+        return None;
+    }
+    Some(ocr.blocks.iter().map(|block| block.confidence).sum::<f32>() / ocr.blocks.len() as f32)
+}
+
+/// 普通 OCR 结果是否需要 Vision 兜底：空结果，或块平均置信度偏低。
+fn needs_vision_fallback(ocr: &OcrResult) -> bool {
+    if ocr.is_empty() {
+        return true;
+    }
+    matches!(mean_confidence(ocr), Some(mean) if mean < VISION_FALLBACK_CONFIDENCE)
+}
+
+/// 普通引擎直出的来源信息。
+fn primary_source(
+    engine: String,
+    confidence: Option<f32>,
+    vision_note: Option<&str>,
+) -> crate::state::OcrSourceInfo {
+    crate::state::OcrSourceInfo {
+        engine,
+        via: "primary".to_string(),
+        confidence,
+        vision_note: vision_note.map(str::to_string),
+    }
+}
+
+/// 把识别来源记入全局状态（Popup 展示用；锁中毒时静默跳过）。
+fn remember_ocr_source(state: &AppState, info: crate::state::OcrSourceInfo) {
+    if let Ok(mut guard) = state.ocr_source.lock() {
+        *guard = Some(info);
+    }
+}
+
+/// 普通 OCR → Vision LLM 高级 fallback（Phase 6）。
+/// Vision 不可用（未配置 / 无能力 Provider）或识别失败时**不阻断**：
+/// 退回原始结果，由空结果错误路径给用户提示。
+/// 返回结果 + 来源信息（哪个引擎、哪条路径、置信度），Popup 据此
+/// 让用户能区分「识别错了」和「Vision 根本没触发」。
+async fn recognize_with_vision_fallback(
+    database: &Database,
+    capture: &lingua_core::OcrImage,
+) -> AppResult<(OcrResult, crate::state::OcrSourceInfo)> {
+    let provider = build_ocr_provider(database)?;
+    let engine = provider.name().to_string();
+    let primary = provider.recognize(capture).await?;
+    let primary_confidence = mean_confidence(&primary);
+
+    if !needs_vision_fallback(&primary) {
+        return Ok((primary, primary_source(engine, primary_confidence, None)));
+    }
+
+    tracing::debug!("ocr result empty or low-confidence; trying vision fallback");
+    let vision_provider = pipeline::build_router(database)
+        .and_then(|router| router.provider_for(lingua_ai::AiTask::Vision));
+    let Some(ai_provider) = vision_provider.ok() else {
+        tracing::debug!("no vision-capable provider configured; skipping fallback");
+        return Ok((
+            primary,
+            primary_source(
+                engine,
+                primary_confidence,
+                Some("未配置视觉能力的 Provider，未走 Vision 兜底"),
+            ),
+        ));
+    };
+    let vision_engine = format!("vision:{}", ai_provider.id());
+    let vision = lingua_ocr::VisionOcrProvider::new(ai_provider);
+    match vision.recognize(capture).await {
+        Ok(result) if !result.is_empty() => {
+            tracing::debug!(
+                chars = result.text.chars().count(),
+                "ocr recovered via vision fallback"
+            );
+            Ok((
+                result,
+                crate::state::OcrSourceInfo {
+                    engine: vision_engine,
+                    via: "auto".to_string(),
+                    confidence: None,
+                    vision_note: None,
+                },
+            ))
+        }
+        Ok(_) => {
+            tracing::debug!("vision fallback returned no text; keeping primary result");
+            Ok((
+                primary,
+                primary_source(
+                    engine,
+                    primary_confidence,
+                    Some("Vision 识别为空，保留原始结果"),
+                ),
+            ))
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "vision fallback failed; keeping primary result");
+            Ok((
+                primary,
+                primary_source(
+                    engine,
+                    primary_confidence,
+                    Some(&format!("Vision 调用失败，保留原始结果：{error}")),
+                ),
+            ))
+        }
+    }
+}
+
 /// 启动截图会话：截光标所在显示器整屏 → 存入内存会话 →
 /// 在同一块屏幕上显示选区 overlay（多显示器下跟着光标走，
 /// 不再固定主显示器）。
@@ -229,12 +344,21 @@ async fn run(app: &AppHandle, rect: Rect, viewport: (f64, f64)) -> AppResult<()>
     .await
     .map_err(|error| AppError::Internal(error.to_string()))??;
 
-    // 3. OCR。
-    let ocr_provider = build_ocr_provider(&state.database.clone())?;
-    let ocr: OcrResult = ocr_provider.recognize(&capture).await?;
+    // 保留选区截图供「用 Vision 重新识别」手动重试：
+    // tesseract 常见故障是高置信度的错，自动兜底触发不了。
+    if let Ok(mut retry) = state.ocr_retry.lock() {
+        *retry = Some(capture.clone());
+    }
+
+    // 3. OCR（普通引擎 → 空结果 / 低置信度时 Vision LLM 兜底）。
+    let (ocr, ocr_source) =
+        recognize_with_vision_fallback(&state.database.clone(), &capture).await?;
+    remember_ocr_source(&state, ocr_source);
     if ocr.is_empty() {
         return Err(AppError::Ocr(
-            "no text recognized in the selected area; try a larger selection".to_string(),
+            "no text recognized in the selected area; try a larger selection or enable a \
+             vision-capable provider in Settings"
+                .to_string(),
         ));
     }
     tracing::debug!(
@@ -243,25 +367,36 @@ async fn run(app: &AppHandle, rect: Rect, viewport: (f64, f64)) -> AppResult<()>
         "ocr completed"
     );
 
-    // 识别完成：把识别文本先亮出来，翻译流式填充。
+    translate_and_show(app, &state.database.clone(), ocr.text, ocr.language).await
+}
+
+/// 对识别出的文本走翻译（Router + Engine，流式填充）并切到结果态。
+/// OCR pipeline 与手动 Vision 重试共用；`language_hint` 为识别端
+/// 报告的语种（翻译端未检出时兜底）。
+async fn translate_and_show(
+    app: &AppHandle,
+    database: &lingua_database::Database,
+    source_text: String,
+    language_hint: Option<String>,
+) -> AppResult<()> {
+    // 识别文本先行亮出，译文流式填充。
     popup::show(
         app,
         PopupState::Loading {
-            source_text: Some(ocr.text.clone()),
+            source_text: Some(source_text.clone()),
         },
     )
     .await?;
 
-    // 4. 翻译（复用划词的 Router + Engine；多行文本走 AI 分支）。
-    let router = pipeline::build_router(&state.database.clone())?;
+    let router = pipeline::build_router(database)?;
     let ai_provider = router.provider_for(lingua_ai::AiTask::Translate)?;
     let dictionary = Arc::new(lingua_dictionary::SqliteDictionaryProvider::new(
-        state.database.clone(),
+        database.clone(),
     ));
     let engine = TranslationEngine::new(ai_provider).with_dictionary(Some(dictionary));
     let request = lingua_core::translation::TranslationRequest::new(
-        ocr.text.clone(),
-        pipeline::target_language(&state.database)?,
+        source_text.clone(),
+        pipeline::target_language(database)?,
     );
     let app_for_delta = app.clone();
     let mut result = engine
@@ -272,12 +407,115 @@ async fn run(app: &AppHandle, rect: Rect, viewport: (f64, f64)) -> AppResult<()>
             }
         })
         .await?;
-    result.source_text = ocr.text;
+    result.source_text = source_text;
     if result.detected_language.is_none() {
-        result.detected_language = ocr.language.as_deref().map(lingua_core::Language::parse);
+        result.detected_language = language_hint.as_deref().map(lingua_core::Language::parse);
     }
 
-    // 5. 结果态。
     popup::show(app, PopupState::Result(Box::new(result))).await?;
     Ok(())
+}
+
+/// 手动「用 Vision 重新识别」：对保留的选区截图直接走 Vision
+/// （跳过普通 OCR），成功后复用翻译链路；失败以 popup 错误态呈现。
+pub async fn run_vision_retry(app: AppHandle) {
+    if let Err(error) = vision_retry(&app).await {
+        tracing::warn!(error = %error, "vision retry failed");
+        let popup_state = PopupState::Error {
+            kind: error.kind().to_string(),
+            message: error.to_string(),
+        };
+        if let Err(show_error) = popup::show(&app, popup_state).await {
+            tracing::error!(error = %show_error, "failed to show vision retry error");
+        }
+    }
+}
+
+async fn vision_retry(app: &AppHandle) -> AppResult<()> {
+    let state = app.state::<AppState>();
+    let capture = {
+        let guard = state
+            .ocr_retry
+            .lock()
+            .map_err(|_| AppError::Internal("ocr retry lock poisoned".into()))?;
+        guard.clone().ok_or_else(|| {
+            AppError::InvalidInput("no captured image to re-recognize".to_string())
+        })?
+    };
+
+    popup::show(app, PopupState::Loading { source_text: None }).await?;
+
+    let router = pipeline::build_router(&state.database.clone())?;
+    let ai_provider = router.provider_for(lingua_ai::AiTask::Vision)?;
+    let vision_engine = format!("vision:{}", ai_provider.id());
+    let ocr = lingua_ocr::VisionOcrProvider::new(ai_provider)
+        .recognize(&capture)
+        .await?;
+    if ocr.is_empty() {
+        return Err(AppError::Ocr(
+            "vision recognized no text in the selection".to_string(),
+        ));
+    }
+    tracing::debug!(chars = ocr.text.chars().count(), "vision retry recognized");
+    remember_ocr_source(
+        &state,
+        crate::state::OcrSourceInfo {
+            engine: vision_engine,
+            via: "manual".to_string(),
+            confidence: None,
+            vision_note: None,
+        },
+    );
+
+    translate_and_show(app, &state.database.clone(), ocr.text, ocr.language).await
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+    use lingua_core::{OcrBlock, OcrLine};
+
+    fn result_with(confidences: &[f32]) -> OcrResult {
+        let blocks = confidences
+            .iter()
+            .map(|confidence| OcrBlock {
+                text: "word".into(),
+                bbox: [0, 0, 10, 10],
+                confidence: *confidence,
+                lines: vec![OcrLine {
+                    text: "word".into(),
+                    bbox: [0, 0, 10, 10],
+                    confidence: *confidence,
+                    words: vec![],
+                }],
+            })
+            .collect();
+        let text = if confidences.is_empty() {
+            String::new()
+        } else {
+            "word".into()
+        };
+        OcrResult {
+            text,
+            blocks,
+            language: None,
+        }
+    }
+
+    #[test]
+    fn vision_fallback_triggers_on_empty_or_low_confidence() {
+        assert!(needs_vision_fallback(&OcrResult::default()));
+        assert!(needs_vision_fallback(&result_with(&[0.31, 0.52])));
+    }
+
+    #[test]
+    fn vision_fallback_skips_on_confident_result() {
+        assert!(!needs_vision_fallback(&result_with(&[0.95, 0.89])));
+        // 有文本但没有块结构（如部分 HTTP 引擎不返回块）：只按非空判定。
+        let mut no_blocks = result_with(&[0.9]);
+        no_blocks.blocks.clear();
+        assert!(!needs_vision_fallback(&no_blocks));
+    }
 }
