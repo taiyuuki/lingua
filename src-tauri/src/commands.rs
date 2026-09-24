@@ -80,8 +80,9 @@ pub struct ProviderDto {
     pub model: Option<String>,
     pub organization: Option<String>,
     pub timeout_secs: u64,
+    /// 厂商扩展参数（JSON 对象文本）；保存时校验必须是合法 JSON 对象。
     #[serde(default)]
-    pub disable_thinking: bool,
+    pub extra_body: Option<String>,
     #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
@@ -98,14 +99,14 @@ impl ProviderDto {
             model: record.model,
             organization: record.organization,
             timeout_secs: record.timeout_secs,
-            disable_thinking: record.disable_thinking,
+            extra_body: record.extra_body,
             api_key: None,
             has_api_key,
         }
     }
 
-    fn to_record(&self) -> ProviderRecord {
-        ProviderRecord {
+    fn to_record(&self) -> AppResult<ProviderRecord> {
+        Ok(ProviderRecord {
             id: self.id.trim().to_string(),
             name: self.name.trim().to_string(),
             kind: self.kind,
@@ -121,13 +122,30 @@ impl ProviderDto {
             can_chat: true,
             can_translate: true,
             can_vision: false,
-            disable_thinking: self.disable_thinking,
+            extra_body: normalized_extra_body(self.extra_body.as_deref())?,
             api_key_ref: Some(SecretRef::provider(self.id.trim()).account),
-        }
+        })
     }
 }
 
 /// 列出全部 Provider（含每个的密钥存在状态），按创建顺序。
+/// 校验并归一化 extra_body：空 → None；必须是合法 JSON 对象，
+/// 存储为紧凑形式（非法输入返回 InvalidInput，不让坏数据进库）。
+fn normalized_extra_body(raw: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(text) = raw.map(str::trim).filter(|text| !text.is_empty()) else {
+        return Ok(None);
+    };
+    let value: serde_json::Value = serde_json::from_str(text).map_err(|error| {
+        AppError::InvalidInput(format!("extra_body is not valid JSON: {error}"))
+    })?;
+    if !value.is_object() {
+        return Err(AppError::InvalidInput(
+            "extra_body must be a JSON object".to_string(),
+        ));
+    }
+    Ok(Some(value.to_string()))
+}
+
 #[tauri::command]
 pub async fn list_providers(
     state: tauri::State<'_, AppState>,
@@ -161,7 +179,7 @@ pub async fn save_provider(
 ) -> Result<(), AppError> {
     let database = state.database.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let record = provider.to_record();
+        let record = provider.to_record()?;
         if record.id.is_empty() || record.base_url.is_empty() {
             return Err(AppError::InvalidInput(
                 "provider id and base_url are required".to_string(),

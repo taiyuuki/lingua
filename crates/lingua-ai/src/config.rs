@@ -48,11 +48,14 @@ pub struct ProviderConfig {
     pub timeout_secs: u64,
     #[serde(default)]
     pub capabilities: crate::types::ProviderCapabilities,
-    /// 请求体附带 `{"thinking": {"type": "disabled"}}`，用于关闭
-    /// 智谱 GLM 等默认开启深度思考的模型（翻译类任务通常不需要推理）。
-    /// 仅对支持该参数的服务启用；OpenAI 官方接口会拒绝未知参数。
+    /// 厂商扩展参数（JSON 对象），逐键合并进 chat/completions 请求体，
+    /// 同名键覆盖标准字段。例：
+    /// * 智谱 GLM 关闭深度思考：`{"thinking":{"type":"disabled"}}`
+    /// * OpenAI o 系列推理力度：`{"reasoning_effort":"low"}`
+    ///
+    /// 注意：OpenAI 官方接口会拒绝未知参数，扩展键只对支持的厂商填。
     #[serde(default)]
-    pub disable_thinking: bool,
+    pub extra_body: Option<serde_json::Value>,
     /// 运行时密钥；**不序列化**。Phase 2 起由 OS 密钥库读写。
     #[serde(skip)]
     pub api_key: Option<String>,
@@ -73,7 +76,7 @@ impl ProviderConfig {
             organization: None,
             timeout_secs: default_timeout_secs(),
             capabilities: crate::types::ProviderCapabilities::default(),
-            disable_thinking: false,
+            extra_body: None,
             api_key: None,
         }
     }

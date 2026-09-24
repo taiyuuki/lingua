@@ -22,8 +22,8 @@ pub struct ProviderRecord {
     pub can_chat: bool,
     pub can_translate: bool,
     pub can_vision: bool,
-    /// 请求体附带 `{"thinking": {"type": "disabled"}}`（GLM 等）。
-    pub disable_thinking: bool,
+    /// 厂商扩展参数（JSON 对象文本），逐键合并进请求体。
+    pub extra_body: Option<String>,
     pub api_key_ref: Option<String>,
 }
 
@@ -43,7 +43,11 @@ impl ProviderRecord {
                 translate: self.can_translate,
                 vision: self.can_vision,
             },
-            disable_thinking: self.disable_thinking,
+            extra_body: self
+                .extra_body
+                .as_deref()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+                .filter(|value| value.is_object()),
             api_key: None,
         }
     }
@@ -65,7 +69,7 @@ fn row_to_record(row: &Row<'_>) -> rusqlite::Result<ProviderRecord> {
         can_chat: row.get::<_, i64>("can_chat")? != 0,
         can_translate: row.get::<_, i64>("can_translate")? != 0,
         can_vision: row.get::<_, i64>("can_vision")? != 0,
-        disable_thinking: row.get::<_, i64>("disable_thinking")? != 0,
+        extra_body: row.get("extra_body")?,
         api_key_ref: row.get("api_key_ref")?,
     })
 }
@@ -82,7 +86,7 @@ impl Database {
         conn.execute(
             "INSERT INTO providers (
                 id, name, kind, base_url, model, organization, timeout_secs,
-                can_chat, can_translate, can_vision, disable_thinking, api_key_ref, updated_at
+                can_chat, can_translate, can_vision, extra_body, api_key_ref, updated_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -97,7 +101,7 @@ impl Database {
                 can_chat = excluded.can_chat,
                 can_translate = excluded.can_translate,
                 can_vision = excluded.can_vision,
-                disable_thinking = excluded.disable_thinking,
+                extra_body = excluded.extra_body,
                 api_key_ref = excluded.api_key_ref,
                 updated_at = excluded.updated_at",
             params![
@@ -114,7 +118,7 @@ impl Database {
                 record.can_chat,
                 record.can_translate,
                 record.can_vision,
-                record.disable_thinking,
+                record.extra_body,
                 record.api_key_ref,
             ],
         )
@@ -174,7 +178,7 @@ mod tests {
             can_chat: true,
             can_translate: true,
             can_vision: false,
-            disable_thinking: false,
+            extra_body: None,
             api_key_ref: Some(format!("provider/{id}")),
         }
     }

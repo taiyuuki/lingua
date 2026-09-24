@@ -42,6 +42,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "provider_thinking",
         sql: include_str!("../migrations/0005_provider_thinking.sql"),
     },
+    Migration {
+        version: 6,
+        name: "provider_extra_body",
+        sql: include_str!("../migrations/0006_provider_extra_body.sql"),
+    },
 ];
 
 /// 当前代码支持的最高 schema 版本。

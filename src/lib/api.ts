@@ -47,8 +47,8 @@ export interface ProviderDto {
   model: string | null;
   organization: string | null;
   timeoutSecs: number;
-  /** 请求体附带 {"thinking":{"type":"disabled"}}，关闭 GLM 等的深度思考。 */
-  disableThinking: boolean;
+  /** 厂商扩展参数（JSON 对象文本），逐键合并进请求体。 */
+  extraBody: string | null;
   apiKey: string | null;
   hasApiKey: boolean;
 }

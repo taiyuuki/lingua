@@ -66,14 +66,19 @@ struct ChatCompletionsBody<'a> {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
-    /// 厂商扩展：`{"type": "disabled"}` 关闭深度思考（智谱 GLM 等）。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<ThinkingControl>,
 }
 
-#[derive(Serialize)]
-struct ThinkingControl {
-    r#type: &'static str,
+/// 把 `extra_body`（厂商扩展参数，JSON 对象）逐键合并进请求体；
+/// 同名键以扩展参数为准（显式覆盖标准字段）。非对象值忽略。
+fn merge_extra_body(body: &mut serde_json::Value, extra: Option<&serde_json::Value>) {
+    if let (Some(map), Some(extra)) = (
+        body.as_object_mut(),
+        extra.and_then(|value| value.as_object()),
+    ) {
+        for (key, value) in extra {
+            map.insert(key.clone(), value.clone());
+        }
+    }
 }
 
 /// 响应体：字段做宽容解析（部分兼容服务会省略字段）。
@@ -124,17 +129,15 @@ impl crate::provider::AIProvider for OpenAiCompatibleProvider {
             .as_deref()
             .or(self.config.model.as_deref())
             .map(str::to_owned);
-        let body = ChatCompletionsBody {
+        let typed = ChatCompletionsBody {
             model: model.as_deref(),
             messages: &request.messages,
             temperature: request.temperature,
             max_tokens: request.max_tokens,
-            thinking: if self.config.disable_thinking {
-                Some(ThinkingControl { r#type: "disabled" })
-            } else {
-                None
-            },
         };
+        let mut body =
+            serde_json::to_value(&typed).map_err(|error| AppError::Internal(error.to_string()))?;
+        merge_extra_body(&mut body, self.config.extra_body.as_ref());
 
         let mut http_request = self.http.post(url).json(&body);
         if let Some(key) = self.config.api_key.as_deref().filter(|key| !key.is_empty()) {
@@ -363,44 +366,30 @@ mod tests {
     }
 
     #[test]
-    fn thinking_control_serialized_only_when_enabled() {
-        let mut config = ProviderConfig::new("glm", "GLM");
-        config.base_url = Some("https://open.bigmodel.cn/api/paas/v4".into());
-        config.disable_thinking = true;
-        let provider = OpenAiCompatibleProvider::new(config).unwrap();
-        let body = ChatCompletionsBody {
-            model: None,
-            messages: &[],
-            temperature: None,
-            max_tokens: None,
-            thinking: if provider.config.disable_thinking {
-                Some(ThinkingControl { r#type: "disabled" })
-            } else {
-                None
-            },
-        };
-        let json = serde_json::to_value(&body).unwrap();
-        assert_eq!(json["thinking"], serde_json::json!({ "type": "disabled" }));
+    fn extra_body_merges_into_request_and_overrides() {
+        let mut body = serde_json::json!({
+            "model": "glm-4.6",
+            "messages": [],
+            "max_tokens": 100
+        });
+        let extra = serde_json::json!({
+            "thinking": { "type": "disabled" },
+            "max_tokens": 512
+        });
+        merge_extra_body(&mut body, Some(&extra));
+        assert_eq!(body["thinking"], serde_json::json!({ "type": "disabled" }));
+        assert_eq!(body["max_tokens"], 512, "扩展键覆盖标准字段");
+    }
 
-        let mut plain = ProviderConfig::new("openai", "OpenAI");
-        plain.base_url = Some("https://api.openai.com/v1".into());
-        let provider = OpenAiCompatibleProvider::new(plain).unwrap();
-        let body = ChatCompletionsBody {
-            model: None,
-            messages: &[],
-            temperature: None,
-            max_tokens: None,
-            thinking: if provider.config.disable_thinking {
-                Some(ThinkingControl { r#type: "disabled" })
-            } else {
-                None
-            },
-        };
-        let json = serde_json::to_value(&body).unwrap();
-        assert!(
-            json.get("thinking").is_none(),
-            "未开启时不应发送 thinking 字段"
-        );
+    #[test]
+    fn extra_body_none_or_non_object_is_noop() {
+        let mut body = serde_json::json!({ "model": "x" });
+        merge_extra_body(&mut body, None);
+        assert_eq!(body["model"], "x");
+
+        let not_object = serde_json::json!([1, 2, 3]);
+        merge_extra_body(&mut body, Some(&not_object));
+        assert_eq!(body["model"], "x");
     }
 
     #[test]

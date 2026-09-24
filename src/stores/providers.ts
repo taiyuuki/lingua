@@ -20,7 +20,7 @@ export interface ProviderForm {
   model: string;
   apiKeyInput: string;
   timeoutSecs: number;
-  disableThinking: boolean;
+  extraBody: string;
 }
 
 function emptyForm(): ProviderForm {
@@ -33,7 +33,7 @@ function emptyForm(): ProviderForm {
     model: "",
     apiKeyInput: "",
     timeoutSecs: 60,
-    disableThinking: false,
+    extraBody: "",
   };
 }
 
@@ -80,7 +80,7 @@ export const useProvidersStore = defineStore("providers", () => {
       model: provider.model ?? "",
       apiKeyInput: "",
       timeoutSecs: provider.timeoutSecs,
-      disableThinking: provider.disableThinking,
+      extraBody: provider.extraBody ?? "",
     });
     saveError.value = null;
   }
@@ -101,7 +101,7 @@ export const useProvidersStore = defineStore("providers", () => {
         model: form.model.trim() || null,
         organization: null,
         timeoutSecs: Math.min(Math.max(Math.round(form.timeoutSecs) || 60, 5), 600),
-        disableThinking: form.disableThinking,
+        extraBody: form.extraBody.trim() === "" ? null : form.extraBody.trim(),
         apiKey: form.apiKeyInput === "" ? null : form.apiKeyInput,
         hasApiKey: false,
       });
