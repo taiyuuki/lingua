@@ -173,7 +173,30 @@ onMounted(() => {
             placeholder="留空表示不修改"
           >
         </label>
+        <label class="field">
+          <span>超时（秒）</span>
+          <input
+            v-model.number="form.timeoutSecs"
+            type="number"
+            min="5"
+            max="600"
+          >
+        </label>
       </div>
+
+      <label class="field">
+        <span>
+          厂商扩展参数（JSON 对象，逐键合并进请求体。例：智谱 GLM 关闭深度思考
+          {"thinking":{"type":"disabled"}}；OpenAI o 系列推理力度
+          {"reasoning_effort":"low"}。留空不发送）
+        </span>
+        <textarea
+          v-model="form.extraBody"
+          rows="2"
+          placeholder="{&quot;thinking&quot;:{&quot;type&quot;:&quot;disabled&quot;}}"
+          spellcheck="false"
+        />
+      </label>
 
       <div class="form-footer">
         <button
