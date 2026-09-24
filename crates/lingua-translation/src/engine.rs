@@ -13,6 +13,7 @@ use lingua_core::{
     AppError, AppResult, Language,
     translation::{TranslationMode, TranslationRequest, TranslationResult},
 };
+use std::sync::Arc;
 
 /// 翻译 Prompt（编译期内嵌，修改后重新编译即生效）。
 mod prompts {
@@ -21,13 +22,12 @@ mod prompts {
 }
 
 pub struct TranslationEngine {
-    provider: Box<dyn AIProvider>,
+    provider: Arc<dyn AIProvider>,
 }
 
 impl TranslationEngine {
-    /// Phase 1：单 Provider 构造。Phase 2 的 AI Router 会在这里
-    /// 换成按任务挑选 Provider 的注册表。
-    pub fn new(provider: Box<dyn AIProvider>) -> Self {
+    /// 用 Router 选出的 Provider 构造引擎（共享所有权，多个引擎可复用）。
+    pub fn new(provider: Arc<dyn AIProvider>) -> Self {
         Self { provider }
     }
 
@@ -182,7 +182,7 @@ mod tests {
 
     #[tokio::test]
     async fn parses_structured_json_response() {
-        let engine = TranslationEngine::new(Box::new(ScriptedProvider {
+        let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
             response: r#"```json
 {"detected_language": "en", "translated_text": "短暂的", "alternatives": ["转瞬即逝的"], "explanation": "形容存在时间极短"}
 ```"#
@@ -198,7 +198,7 @@ mod tests {
 
     #[tokio::test]
     async fn plain_text_response_falls_back_to_translation() {
-        let engine = TranslationEngine::new(Box::new(ScriptedProvider {
+        let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
             response: "短暂的".into(),
         }));
         let result = engine.translate(&request("ephemeral")).await.unwrap();
@@ -209,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_json_falls_back_gracefully() {
-        let engine = TranslationEngine::new(Box::new(ScriptedProvider {
+        let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
             response: "{oops not json".into(),
         }));
         let result = engine.translate(&request("hello")).await.unwrap();
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn prompt_contains_text_and_target() {
-        let engine = TranslationEngine::new(Box::new(ScriptedProvider {
+        let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
             response: "{}".into(),
         }));
         let (system, user) = engine.render_prompt(&request("hello"));

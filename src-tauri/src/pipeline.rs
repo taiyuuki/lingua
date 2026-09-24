@@ -1,25 +1,26 @@
 //! 划词翻译 pipeline：
 //!
-//! 选中文本 → Translation Engine（AI Provider）→ Popup 展示。
+//! 选中文本 → AI Router（按任务选 Provider）→ Translation Engine → Popup。
 //!
 //! 顺序约束：**必须先抓选区再弹 popup**——popup 一旦聚焦，
 //! 「当前聚焦元素」就变成我们自己，AX / Cmd+C 都会失效。
 
 use crate::popup;
 use crate::state::{AppState, PopupState};
-use lingua_ai::OpenAiCompatibleProvider;
+use lingua_ai::{AIRouter, AiTask, OpenAiCompatibleProvider};
 use lingua_core::translation::TranslationRequest;
-use lingua_core::{AppError, AppResult, Language};
+use lingua_core::{AppResult, Language};
 use lingua_database::Database;
 use lingua_secrets::{KeyringSecretStore, SecretRef, SecretStore};
 use lingua_translation::TranslationEngine;
+use std::collections::HashSet;
 use tauri::{AppHandle, Manager};
 
 /// settings 表中的键名（集中定义，避免散落字符串）。
 pub const SETTINGS_DEFAULT_PROVIDER: &str = "ai.default_provider_id";
+pub const SETTINGS_ROUTE_TRANSLATE: &str = "router.task.translate";
 pub const SETTINGS_TARGET_LANGUAGE: &str = "translation.target_language";
 pub const SETTINGS_SHORTCUT: &str = "shortcut.translate";
-pub const DEFAULT_PROVIDER_ID: &str = "default";
 pub const DEFAULT_SHORTCUT: &str = "alt+t";
 pub const DEFAULT_TARGET_LANGUAGE: &str = "zh";
 
@@ -51,8 +52,10 @@ async fn run(app: &AppHandle) -> AppResult<()> {
     // 2. 立即弹 popup 展示加载态（用户有反馈，翻译可能耗时数秒）。
     popup::show(app, PopupState::Loading).await?;
 
-    // 3. 组装引擎并翻译。
-    let engine = build_engine(&state.database)?;
+    // 3. 经 Router 选出 Translate 任务的 Provider，组装引擎并翻译。
+    let router = build_router(&state.database)?;
+    let provider = router.provider_for(AiTask::Translate)?;
+    let engine = TranslationEngine::new(provider);
     let request = TranslationRequest::new(selected.text, target_language(&state.database)?);
     let result = engine.translate(&request).await?;
 
@@ -61,32 +64,50 @@ async fn run(app: &AppHandle) -> AppResult<()> {
     Ok(())
 }
 
-/// 从数据库 + OS 密钥库组装默认 Translation Engine。
-///
-/// Phase 2 会把这一步换成 AI Router：按任务在多个 Provider 间挑选。
-pub fn build_engine(database: &Database) -> AppResult<TranslationEngine> {
-    let provider_id = read_default_provider_id(database);
-    let record = database.get_provider(&provider_id)?.ok_or_else(|| {
-        AppError::InvalidInput(format!(
-            "AI provider `{provider_id}` is not configured; open Settings to set base_url / api key"
-        ))
-    })?;
-
-    let mut config = record.to_config();
+/// 从数据库 + OS 密钥库组装 AI Router：注册全部 Provider，
+/// 应用默认 Provider 与任务路由（指向已删除 Provider 的路由被忽略）。
+pub fn build_router(database: &Database) -> AppResult<AIRouter> {
     let secrets = KeyringSecretStore::default();
-    config.api_key = secrets.get_secret(&SecretRef::provider(&provider_id))?;
+    let configured_default = read_default_provider_id(database);
+    let mut registered: HashSet<String> = HashSet::new();
 
-    let provider = OpenAiCompatibleProvider::new(config)?;
-    Ok(TranslationEngine::new(Box::new(provider)))
+    let mut builder = AIRouter::builder();
+    for record in database.list_providers()? {
+        let mut config = record.to_config();
+        config.api_key = secrets.get_secret(&SecretRef::provider(&record.id))?;
+        if configured_default.as_deref() == Some(record.id.as_str()) {
+            builder = builder.with_default(&record.id);
+        }
+        registered.insert(record.id.clone());
+        builder = builder.register(OpenAiCompatibleProvider::new(config)?);
+    }
+
+    if let Some(translate_id) = read_route_provider(database, SETTINGS_ROUTE_TRANSLATE) {
+        if registered.contains(&translate_id) {
+            builder = builder.route(AiTask::Translate, translate_id);
+        } else {
+            tracing::warn!(provider = %translate_id, "translate route points to a missing provider; ignoring");
+        }
+    }
+
+    Ok(builder.build())
 }
 
-pub fn read_default_provider_id(database: &Database) -> String {
+/// 默认 Provider id；仅当设置值存在时返回（不存在由 build_router 回退）。
+pub fn read_default_provider_id(database: &Database) -> Option<String> {
     database
         .get_setting(SETTINGS_DEFAULT_PROVIDER)
         .ok()
         .flatten()
         .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_else(|| DEFAULT_PROVIDER_ID.to_string())
+}
+
+pub fn read_route_provider(database: &Database, key: &str) -> Option<String> {
+    database
+        .get_setting(key)
+        .ok()
+        .flatten()
+        .and_then(|value| value.as_str().map(str::to_string))
 }
 
 pub fn read_target_language_code(database: &Database) -> String {
@@ -116,24 +137,88 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+    use lingua_ai::ProviderKind;
+    use lingua_database::providers::ProviderRecord;
 
-    #[test]
-    fn settings_defaults_are_sane() {
+    fn empty_database() -> Database {
         let database = Database::open_in_memory().unwrap();
         database.migrate().unwrap();
-        assert_eq!(read_default_provider_id(&database), "default");
+        database
+    }
+
+    fn record(id: &str) -> ProviderRecord {
+        ProviderRecord {
+            id: id.to_string(),
+            name: id.to_string(),
+            kind: ProviderKind::OpenAiCompatible,
+            base_url: format!("https://example.com/{id}/v1"),
+            model: None,
+            organization: None,
+            timeout_secs: 30,
+            can_chat: true,
+            can_translate: true,
+            can_vision: false,
+            api_key_ref: Some(format!("provider/{id}")),
+        }
+    }
+
+    #[test]
+    fn empty_database_yields_unconfigured_router() {
+        let database = empty_database();
+        assert_eq!(read_default_provider_id(&database), None);
         assert_eq!(read_shortcut(&database), "alt+t");
         assert_eq!(target_language(&database).unwrap(), Language::Zh);
-        let Err(error) = build_engine(&database) else {
-            unreachable!("expected missing-provider error");
+
+        let router = build_router(&database).unwrap();
+        let Err(error) = router.provider_for(AiTask::Translate) else {
+            unreachable!("expected unconfigured error");
         };
         assert_eq!(error.kind(), "invalid_input");
     }
 
     #[test]
+    fn router_uses_default_and_ignores_dangling_routes() {
+        let database = empty_database();
+        database.upsert_provider(&record("local")).unwrap();
+        database.upsert_provider(&record("cloud")).unwrap();
+        database
+            .set_setting(SETTINGS_DEFAULT_PROVIDER, &serde_json::json!("cloud"))
+            .unwrap();
+        // 指向已删除 Provider 的路由应被忽略。
+        database
+            .set_setting(SETTINGS_ROUTE_TRANSLATE, &serde_json::json!("ghost"))
+            .unwrap();
+
+        let router = build_router(&database).unwrap();
+        assert_eq!(
+            router.provider_for(AiTask::Translate).unwrap().id(),
+            "cloud"
+        );
+        assert_eq!(router.provider_ids(), vec!["cloud", "local"]);
+    }
+
+    #[test]
+    fn translate_route_overrides_default() {
+        let database = empty_database();
+        database.upsert_provider(&record("local")).unwrap();
+        database.upsert_provider(&record("cloud")).unwrap();
+        database
+            .set_setting(SETTINGS_DEFAULT_PROVIDER, &serde_json::json!("cloud"))
+            .unwrap();
+        database
+            .set_setting(SETTINGS_ROUTE_TRANSLATE, &serde_json::json!("local"))
+            .unwrap();
+
+        let router = build_router(&database).unwrap();
+        assert_eq!(
+            router.provider_for(AiTask::Translate).unwrap().id(),
+            "local"
+        );
+    }
+
+    #[test]
     fn target_language_reads_overrides() {
-        let database = Database::open_in_memory().unwrap();
-        database.migrate().unwrap();
+        let database = empty_database();
         database
             .set_setting(SETTINGS_TARGET_LANGUAGE, &serde_json::json!("ja"))
             .unwrap();

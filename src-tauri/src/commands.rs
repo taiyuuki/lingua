@@ -10,8 +10,8 @@ use crate::{
     POPUP_LABEL, pipeline, platform_error, popup,
     state::{AppState, PopupState},
 };
-use lingua_ai::ProviderKind;
-use lingua_core::{AppError, Language};
+use lingua_ai::{AIProvider, ProviderKind};
+use lingua_core::{AppError, AppResult, Language};
 use lingua_database::providers::ProviderRecord;
 use lingua_secrets::{KeyringSecretStore, SecretRef, SecretStore};
 use serde::{Deserialize, Serialize};
@@ -62,81 +62,121 @@ pub async fn database_status(
     .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
-/// 读取默认 Provider 配置（Phase 1 单 Provider；多 Provider 在 Phase 2）。
+// ---------- Provider 管理（Phase 2） ----------
+
+/// Provider 配置 DTO（前端表单 ↔ 后端）。
 ///
-/// `api_key` 永远不出后端：只返回 `hasApiKey` 布尔值。
-#[tauri::command]
-pub async fn get_provider_config(
-    state: tauri::State<'_, AppState>,
-) -> Result<Option<ProviderConfigDto>, AppError> {
-    let database = state.database.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let provider_id = pipeline::read_default_provider_id(&database);
-        let Some(record) = database.get_provider(&provider_id)? else {
-            return Ok(None);
-        };
-        let has_api_key = KeyringSecretStore::default()
-            .get_secret(&SecretRef::provider(&provider_id))?
-            .is_some();
-        Ok(Some(ProviderConfigDto {
-            id: record.id.clone(),
-            name: record.name.clone(),
+/// 出参时 `apiKey` 恒为 `None`、`hasApiKey` 指示密钥库中是否有密钥；
+/// 入参时 `apiKey` 按 [`save_provider`] 注释中的语义解释。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDto {
+    pub id: String,
+    pub name: String,
+    pub kind: ProviderKind,
+    pub base_url: String,
+    pub model: Option<String>,
+    pub organization: Option<String>,
+    pub timeout_secs: u64,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub has_api_key: bool,
+}
+
+impl ProviderDto {
+    fn from_record(record: ProviderRecord, has_api_key: bool) -> Self {
+        Self {
+            id: record.id,
+            name: record.name,
             kind: record.kind,
-            base_url: record.base_url.clone(),
-            model: record.model.clone(),
-            organization: record.organization.clone(),
+            base_url: record.base_url,
+            model: record.model,
+            organization: record.organization,
             timeout_secs: record.timeout_secs,
-            target_language: Language::parse(&pipeline::read_target_language_code(&database)),
-            shortcut: pipeline::read_shortcut(&database),
             api_key: None,
             has_api_key,
-        }))
+        }
+    }
+
+    fn to_record(&self) -> ProviderRecord {
+        ProviderRecord {
+            id: self.id.trim().to_string(),
+            name: self.name.trim().to_string(),
+            kind: self.kind,
+            base_url: self.base_url.trim().to_string(),
+            model: self
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            organization: self.organization.clone(),
+            timeout_secs: self.timeout_secs,
+            can_chat: true,
+            can_translate: true,
+            can_vision: false,
+            api_key_ref: Some(SecretRef::provider(self.id.trim()).account),
+        }
+    }
+}
+
+/// 列出全部 Provider（含每个的密钥存在状态），按创建顺序。
+#[tauri::command]
+pub async fn list_providers(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ProviderDto>, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let secrets = KeyringSecretStore::default();
+        database
+            .list_providers()?
+            .into_iter()
+            .map(|record| {
+                let has_api_key = secrets
+                    .get_secret(&SecretRef::provider(&record.id))?
+                    .is_some();
+                Ok(ProviderDto::from_record(record, has_api_key))
+            })
+            .collect()
     })
     .await
     .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
-/// 保存默认 Provider 配置。
+/// 插入或更新一个 Provider。
 ///
 /// `api_key` 字段语义：`None` = 不修改；`Some("")` = 删除；非空字符串 = 覆盖。
+/// 保存后若当前没有默认 Provider，则把该 Provider 设为默认。
 #[tauri::command]
-pub async fn save_provider_config(
-    app: tauri::AppHandle,
+pub async fn save_provider(
     state: tauri::State<'_, AppState>,
-    config: ProviderConfigDto,
+    provider: ProviderDto,
 ) -> Result<(), AppError> {
     let database = state.database.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let record = ProviderRecord {
-            id: config.id.clone(),
-            name: config.name,
-            kind: config.kind,
-            base_url: config.base_url,
-            model: config.model,
-            organization: config.organization,
-            timeout_secs: config.timeout_secs,
-            can_chat: true,
-            can_translate: true,
-            can_vision: false,
-            api_key_ref: Some(SecretRef::provider(&config.id).account),
-        };
+        let record = provider.to_record();
+        if record.id.is_empty() || record.base_url.is_empty() {
+            return Err(AppError::InvalidInput(
+                "provider id and base_url are required".to_string(),
+            ));
+        }
         database.upsert_provider(&record)?;
-        database.set_setting(
-            pipeline::SETTINGS_DEFAULT_PROVIDER,
-            &serde_json::json!(config.id),
-        )?;
-        database.set_setting(
-            pipeline::SETTINGS_TARGET_LANGUAGE,
-            &serde_json::json!(config.target_language.code()),
-        )?;
-        database.set_setting(
-            pipeline::SETTINGS_SHORTCUT,
-            &serde_json::json!(config.shortcut),
-        )?;
 
-        let reference = SecretRef::provider(&config.id);
+        let no_usable_default = match pipeline::read_default_provider_id(&database) {
+            Some(id) => database.get_provider(&id)?.is_none(),
+            None => true,
+        };
+        if no_usable_default {
+            database.set_setting(
+                pipeline::SETTINGS_DEFAULT_PROVIDER,
+                &serde_json::json!(record.id),
+            )?;
+        }
+
+        let reference = SecretRef::provider(&record.id);
         let secrets = KeyringSecretStore::default();
-        match config.api_key.as_deref() {
+        match provider.api_key.as_deref() {
             None => {}
             Some("") => {
                 secrets.delete_secret(&reference)?;
@@ -148,34 +188,168 @@ pub async fn save_provider_config(
         Ok(())
     })
     .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 删除 Provider（连同其密钥），并清理指向它的默认 / 路由设置。
+#[tauri::command]
+pub async fn delete_provider(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if database.delete_provider(&id)? {
+            KeyringSecretStore::default().delete_secret(&SecretRef::provider(&id))?;
+        }
+        if pipeline::read_default_provider_id(&database).as_deref() == Some(id.as_str()) {
+            database.remove_setting(pipeline::SETTINGS_DEFAULT_PROVIDER)?;
+        }
+        if pipeline::read_route_provider(&database, pipeline::SETTINGS_ROUTE_TRANSLATE).as_deref()
+            == Some(id.as_str())
+        {
+            database.remove_setting(pipeline::SETTINGS_ROUTE_TRANSLATE)?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 连接测试结果。测试失败不算命令失败，结构化返回给前端展示。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestProviderResult {
+    pub ok: bool,
+    pub latency_ms: Option<u64>,
+    pub reply: Option<String>,
+    pub error: Option<String>,
+}
+
+/// 连接测试：向该 Provider 发一个极小的对话请求。
+#[tauri::command]
+pub async fn test_provider(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<TestProviderResult, AppError> {
+    let database = state.database.clone();
+    // 阻塞部分（DB + 钥匙串）先在阻塞线程里完成。
+    let provider = tauri::async_runtime::spawn_blocking(move || -> AppResult<_> {
+        let record = database
+            .get_provider(&id)?
+            .ok_or_else(|| AppError::InvalidInput(format!("provider `{id}` does not exist")))?;
+        let mut config = record.to_config();
+        config.api_key = KeyringSecretStore::default().get_secret(&SecretRef::provider(&id))?;
+        lingua_ai::OpenAiCompatibleProvider::new(config)
+    })
+    .await
     .map_err(|error| AppError::Internal(error.to_string()))??;
 
-    // 快捷键可能变了，重新注册。
+    let request = lingua_ai::ChatRequest {
+        messages: vec![
+            lingua_ai::ChatMessage::system("You are a connection health check."),
+            lingua_ai::ChatMessage::user("Reply with the single word: pong"),
+        ],
+        model: None,
+        temperature: Some(0.0),
+        max_tokens: Some(16),
+    };
+
+    let start = std::time::Instant::now();
+    match provider.chat(&request).await {
+        Ok(response) => Ok(TestProviderResult {
+            ok: true,
+            latency_ms: Some(start.elapsed().as_millis() as u64),
+            reply: Some(response.content.chars().take(60).collect()),
+            error: None,
+        }),
+        Err(error) => Ok(TestProviderResult {
+            ok: false,
+            latency_ms: Some(start.elapsed().as_millis() as u64),
+            reply: None,
+            error: Some(error.to_string()),
+        }),
+    }
+}
+
+// ---------- 应用设置（路由 + 快捷键） ----------
+
+/// 应用设置：AI Router 路由 + 全局快捷键。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettingsDto {
+    /// 默认 Provider（`None` = 未设置，路由未命中时报「未配置」）。
+    pub default_provider_id: Option<String>,
+    /// 翻译任务路由（`None` = 跟随默认 Provider）。
+    pub translate_provider_id: Option<String>,
+    /// 划词翻译的目标语言（BCP-47 基础码）。
+    pub target_language: Language,
+    pub shortcut: String,
+}
+
+#[tauri::command]
+pub async fn get_app_settings(
+    state: tauri::State<'_, AppState>,
+) -> Result<AppSettingsDto, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(AppSettingsDto {
+            default_provider_id: pipeline::read_default_provider_id(&database),
+            translate_provider_id: pipeline::read_route_provider(
+                &database,
+                pipeline::SETTINGS_ROUTE_TRANSLATE,
+            ),
+            target_language: Language::parse(&pipeline::read_target_language_code(&database)),
+            shortcut: pipeline::read_shortcut(&database),
+        })
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 保存应用设置；快捷键变更会立即重新注册。
+#[tauri::command]
+pub async fn save_app_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    settings: AppSettingsDto,
+) -> Result<(), AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        match settings.default_provider_id.as_deref() {
+            None => {
+                database.remove_setting(pipeline::SETTINGS_DEFAULT_PROVIDER)?;
+            }
+            Some(id) => {
+                database.set_setting(pipeline::SETTINGS_DEFAULT_PROVIDER, &serde_json::json!(id))?
+            }
+        }
+        match settings.translate_provider_id.as_deref() {
+            None => {
+                database.remove_setting(pipeline::SETTINGS_ROUTE_TRANSLATE)?;
+            }
+            Some(id) => {
+                database.set_setting(pipeline::SETTINGS_ROUTE_TRANSLATE, &serde_json::json!(id))?
+            }
+        }
+        database.set_setting(
+            pipeline::SETTINGS_TARGET_LANGUAGE,
+            &serde_json::json!(settings.target_language.code()),
+        )?;
+        database.set_setting(
+            pipeline::SETTINGS_SHORTCUT,
+            &serde_json::json!(settings.shortcut),
+        )?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))??;
+
     crate::register_shortcut_from_settings(&app, &state.database)?;
     Ok(())
 }
 
-/// Provider 配置 DTO（前端表单 ↔ 后端）。
-///
-/// 出参时 `apiKey` 恒为 `None`、`hasApiKey` 指示密钥库中是否有密钥；
-/// 入参时 `apiKey` 按 `save_provider_config` 注释中的语义解释。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderConfigDto {
-    pub id: String,
-    pub name: String,
-    pub kind: ProviderKind,
-    pub base_url: String,
-    pub model: Option<String>,
-    pub organization: Option<String>,
-    pub timeout_secs: u64,
-    pub target_language: Language,
-    pub shortcut: String,
-    #[serde(default)]
-    pub api_key: Option<String>,
-    #[serde(default)]
-    pub has_api_key: bool,
-}
+// ---------- Popup / 权限 ----------
 
 /// 手动打开（或聚焦已隐藏的）Popup 窗口。
 /// 主要用于开发与设置页验证；正常入口是全局快捷键触发的 pipeline。

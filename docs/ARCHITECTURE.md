@@ -30,16 +30,15 @@ OS / Network / SQLite / Models
 |-------|------|------|
 | `lingua-core` | 领域模型：`AppError`（含 `NoSelection`）、`Language`、`SelectedText`、`TranslationRequest/Result`，IPC 序列化契约（camelCase） | ✅ Phase 0/1 |
 | `lingua-platform` | `SelectionProvider` trait + `SelectionService` fallback 编排；macOS 实现（AX 读选区 + Cmd+C 剪贴板 fallback + 光标定位）；Windows/Linux 为明确的 unsupported 占位 | ✅ macOS Phase 1 |
-| `lingua-ai` | `AIProvider` trait、`OpenAiCompatibleProvider`（reqwest/rustls）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1 |
+| `lingua-ai` | `AIProvider` trait、`OpenAiCompatibleProvider`（reqwest/rustls）、`AIRouter`（AiTask → Provider 路由 + 默认回退）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1/2 |
 | `lingua-translation` | Translation Engine + `prompts/translate/` 模板（`{{占位符}}` 渲染，编译期内嵌）；结构化 JSON 解析失败时优雅降级为纯文本 | ✅ Phase 1 |
 | `lingua-database` | SQLite（rusqlite bundled）、migration runner、settings KV、providers 表 DAO | ✅ Phase 0/1 |
 | `lingua-secrets` | `SecretStore` trait + keyring 实现（macOS Keychain / Windows Credential Manager / Linux Secret Service）；API Key 明文只存在这里 | ✅ Phase 1 |
-| `lingua` (src-tauri) | Tauri 壳：commands、全局快捷键、翻译 pipeline、Popup 定位与状态广播 | ✅ Phase 1 |
+| `lingua` (src-tauri) | Tauri 壳：commands、全局快捷键、翻译 pipeline（经 Router）、Popup、Provider 管理/连接测试/应用设置命令 | ✅ Phase 1/2 |
 
 后续按阶段新增（不为形式提前建空 crate）：
 
-- **Phase 2** AI Router（多 Provider 注册表、按任务挑选）、多 Provider 管理 UI、
-  流式输出（SSE）。
+- **流式输出（SSE）**：Phase 2 未做，随 Phase 3+ 的体验优化一起落地。
 - **Phase 5** `lingua-ocr`（`OcrProvider` trait + PaddleOCR）与 `lingua-screenshot`
   （截屏选区，平台差异大：macOS ScreenCaptureKit/CGWindowList、Windows GDI/DXGI、
   Linux X11/Wayland 分治）。
@@ -123,10 +122,23 @@ Capabilities（`src-tauri/capabilities/default.json`）当前只放行
 6. **Windows / Linux 划词未实现**：注册的是明确的 unsupported 占位
    Provider，报「平台暂不支持」而不是假装工作。
 
-## 7. Phase 2 待办（下一步）
+## 7. Phase 2 已知限制
 
-1. AI Router：Provider 注册表 + 按任务路由（普通翻译/复杂任务/Vision 分派）。
-2. 多 Provider 管理 UI（增删改、默认 Provider、连接测试）。
-3. 流式输出（SSE → Popup 增量渲染）。
-4. Prompt 自定义入口（覆盖内置模板）。
-5. 学习模式雏形：单词解释走结构化 JSON（meaning/grammar/nuance/…）。
+1. 多 Provider 管理已完成：增删改、每条连接测试（发 16 token 探测请求并测延迟）、
+   默认 Provider / 翻译任务路由（存 settings 表）、删除时自动清理密钥与路由。
+2. 流式输出（SSE）未做：长文本翻译期间 Popup 只有加载态，随 Phase 3+ 落地。
+3. Prompt 自定义入口未做（内置模板结构已就绪，覆盖逻辑留到词典/学习阶段一起）。
+4. 路由粒度目前只有 Translate 一个任务；Vision（Phase 6）/学习分析（Phase 9）
+   接入时在 `AiTask` 枚举上扩展即可。
+
+## 8. Phase 3 待办（下一步）
+
+按原规划进入 **Dictionary（词典）**：
+
+1. `lingua-database` 新增 migration：`dictionaries` / `dictionary_entries` /
+   `dictionary_definitions` 表（统一 `DictionaryEntry` 模型）。
+2. `DictionaryProvider` trait（`lookup(word, language)`），DB 词典为首个实现。
+3. Translation Engine 路由策略升级：单词/短语 → 词典优先 + AI 补充；
+   句子 → AI。
+4. 可导入公开词典数据（CC-CEDICT / JMdict / ECDICT 等，格式转换器按需实现）。
+5. Popup 词典视图：释义、音标、词性、例句。

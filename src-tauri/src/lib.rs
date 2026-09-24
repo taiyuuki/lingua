@@ -67,8 +67,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::hide_popup,
             commands::latest_popup_state,
             commands::selection_permission_status,
-            commands::get_provider_config,
-            commands::save_provider_config,
+            commands::list_providers,
+            commands::save_provider,
+            commands::delete_provider,
+            commands::test_provider,
+            commands::get_app_settings,
+            commands::save_app_settings,
         ])
         .run(tauri::generate_context!())?;
     Ok(())

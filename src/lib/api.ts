@@ -38,7 +38,7 @@ export interface TranslationResult {
  * Provider 配置。`apiKey` 永远不会被后端返回（恒为 null）；
  * 保存时：null = 不修改，"" = 删除，非空 = 覆盖。
  */
-export interface ProviderConfigDto {
+export interface ProviderDto {
   id: string;
   name: string;
   kind: "openai_compatible" | "openai";
@@ -46,10 +46,23 @@ export interface ProviderConfigDto {
   model: string | null;
   organization: string | null;
   timeoutSecs: number;
-  targetLanguage: string;
-  shortcut: string;
   apiKey: string | null;
   hasApiKey: boolean;
+}
+
+/** 应用设置：AI Router 路由 + 目标语言 + 全局快捷键。 */
+export interface AppSettingsDto {
+  defaultProviderId: string | null;
+  translateProviderId: string | null;
+  targetLanguage: string;
+  shortcut: string;
+}
+
+export interface TestProviderResult {
+  ok: boolean;
+  latencyMs: number | null;
+  reply: string | null;
+  error: string | null;
 }
 
 export async function getAppInfo(): Promise<AppInfo> {
@@ -60,12 +73,28 @@ export async function getDatabaseStatus(): Promise<DatabaseStatus> {
   return invoke<DatabaseStatus>("database_status");
 }
 
-export async function getProviderConfig(): Promise<ProviderConfigDto | null> {
-  return invoke<ProviderConfigDto | null>("get_provider_config");
+export async function listProviders(): Promise<ProviderDto[]> {
+  return invoke<ProviderDto[]>("list_providers");
 }
 
-export async function saveProviderConfig(config: ProviderConfigDto): Promise<void> {
-  await invoke("save_provider_config", { config });
+export async function saveProvider(provider: ProviderDto): Promise<void> {
+  await invoke("save_provider", { provider });
+}
+
+export async function deleteProvider(id: string): Promise<void> {
+  await invoke("delete_provider", { id });
+}
+
+export async function testProvider(id: string): Promise<TestProviderResult> {
+  return invoke<TestProviderResult>("test_provider", { id });
+}
+
+export async function getAppSettings(): Promise<AppSettingsDto> {
+  return invoke<AppSettingsDto>("get_app_settings");
+}
+
+export async function saveAppSettings(settings: AppSettingsDto): Promise<void> {
+  await invoke("save_app_settings", { settings });
 }
 
 export async function selectionPermissionStatus(): Promise<boolean> {
