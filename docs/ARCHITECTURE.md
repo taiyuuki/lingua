@@ -29,7 +29,7 @@ OS / Network / SQLite / Models
 | Crate | 职责 | 状态 |
 |-------|------|------|
 | `lingua-core` | 领域模型：`AppError`（含 `NoSelection`）、`Language`、`SelectedText`、`TranslationRequest/Result`，IPC 序列化契约（camelCase） | ✅ Phase 0/1 |
-| `lingua-platform` | `SelectionProvider` + `SelectionService`；macOS 实现（AX 选区 + 剪贴板 fallback + 光标/截图：`screencapture` CLI + 屏幕录制权限 FFI）；Windows/Linux 明确占位 | ✅ macOS Phase 1/5 |
+| `lingua-platform` | `SelectionProvider` + `SelectionService`；macOS 实现（AX 选区 + 剪贴板 fallback + 光标/截图：`screencapture` CLI + 屏幕录制权限 FFI）；Windows 实现（UI Automation TextPattern 选区 + 剪贴板 fallback（SendInput Ctrl+C）+ 光标（GetCursorPos + 显示器 DPI 换算）+ GDI 截图）；Linux 明确占位 | ✅ macOS Phase 1/5、Windows |
 | `lingua-ai` | `AIProvider` trait、`OpenAiCompatibleProvider`（reqwest/rustls）、`AIRouter`（AiTask → Provider 路由 + 默认回退）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1/2 |
 | `lingua-translation` | Translation Engine：单词 → 词典优先（释义语言须匹配目标语言），未命中/短语/句子 → AI；`prompts/translate/` 模板内嵌；AI JSON 解析失败优雅降级 | ✅ Phase 1/3 |
 | `lingua-dictionary` | `DictionaryProvider` trait、SQLite 词典实现、TSV 导入器（CC-CEDICT 等公开词典可先转 TSV 再导入） | ✅ Phase 3 |
@@ -92,12 +92,19 @@ pipeline::run_translation_pipeline
 | 窗口 | label | 入口 | 状态 |
 |------|-------|------|------|
 | 主窗口 | `main` | `tauri.conf.json` | ✅ Phase 0 |
-| Popup | `popup` | `popup.html`（Vite 多入口） | ✅ 无边框、置顶（工具栏图钉可切换）、skip taskbar、失焦自动隐藏、固定居中定位；Esc 关闭 |
+| Popup | `popup` | `popup.html`（Vite 多入口） | ✅ 无边框、置顶（工具栏图钉可切换）、skip taskbar、失焦自动隐藏、光标所在显示器居中（边界钳制）；Esc 关闭 |
 | OCR 选区 | `ocr-selection` | Phase 5 | 计划：全屏透明 overlay，独立实现注意 Wayland 限制 |
 | Settings / Vocabulary | 复用 main 路由或独立窗口 | Phase 2/4 | 待定 |
 
 Capabilities（`src-tauri/capabilities/default.json`）当前只放行
 `main` / `popup` + `core:default`；新增窗口或插件权限时同步维护。
+
+Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会把
+真实焦点转给子窗口并触发主窗口 `Focused(false)`——「失焦隐藏」
+不能直接信这个事件。现以前台根窗口判定
+（`lingua_platform::window_in_foreground`）区分「点击内部」与
+「点击外部」，前者再由 `popup::handle_focus_lost` 的轮询 watcher
+（150ms）盯到真正失焦才隐藏（父窗口不会再收到第二次失焦事件）。
 
 ## 5. 平台差异备忘（Phase 1/5/10 的输入）
 
@@ -105,6 +112,13 @@ Capabilities（`src-tauri/capabilities/default.json`）当前只放行
 - **划词**：macOS 需要用户在系统设置授予 **辅助功能（Accessibility）** 权限；
   截屏需要 **屏幕录制** 权限。权限检测/引导应走 `AppError::Permission`。
   剪贴板 fallback 必须备份并恢复剪贴板。
+  Windows 无系统级开关：UI Automation / SendInput / GDI 截图开箱可用；
+  唯一边界是 UIPI —— 普通权限进程读不到管理员权限窗口的选区，
+  表现为 `NoSelection`（温和提示，无需权限引导）；GDI 截屏对 DRM
+  保护内容只能得到黑块（平台限制）。剪贴板 fallback 在模拟 Ctrl+C
+  前必须等快捷键的修饰键物理释放：SendInput 与物理按键状态是叠加
+  关系，Alt 未松开时发出的是 Alt+Ctrl+C，应用不会复制
+  （macOS CGEventPost 自带完整修饰键掩码，无此问题）。
 - **Wayland**：无可靠的全局选区坐标与全局快捷键方案，Popup 定位能力受限；
   Phase 10 按桌面环境（GNOME/KDE）逐个处理，X11 下能力完整。
 - **托盘/自启**：Phase 10（`tauri-plugin-autostart`、托盘能力）。
@@ -115,13 +129,16 @@ Capabilities（`src-tauri/capabilities/default.json`）当前只放行
    `pnpm tauri dev` 在真机上手动验证；辅助功能权限需用户手动授予。
 2. **剪贴板 fallback 只备份文本**：富文本/图片剪贴板内容在 fallback 后
    只能恢复为文本；且「选区内容恰好等于剪贴板原文」时无法检测变化。
-3. **Popup 定位未做屏幕边界钳制**：光标在屏幕右/下边缘时 Popup 可能
-   越界（Phase 10 处理，含多显示器）。
+3. **Popup 定位**：光标所在显示器内居中并做边界钳制，多显示器下
+   跟随光标（每次新触发重定位，Loading → Result 原地刷新不跳位）。
+   未使用工作区（居中通常不会压任务栏，极端情况可能遮挡）、
+   Wayland 下光标坐标受限，均留 Phase 10。
 4. **同语言翻译**：源语言 == 目标语言时仍会照翻（Prompt 已要求在
    explanation 里说明），智能换向留给 Phase 2 Router。
 5. **非流式输出**：长文本翻译期间 Popup 只有加载态，Phase 2 加 SSE。
-6. **Windows / Linux 划词未实现**：注册的是明确的 unsupported 占位
-   Provider，报「平台暂不支持」而不是假装工作。
+6. **Linux 划词未实现**：注册的是明确的 unsupported 占位
+   Provider，报「平台暂不支持」而不是假装工作。Windows 划词已实现
+  （UIA + 剪贴板 fallback），见 §5 平台差异备忘的 UIPI 限制。
 
 ## 7. Phase 2 已知限制
 
@@ -165,23 +182,29 @@ Capabilities（`src-tauri/capabilities/default.json`）当前只放行
    text/bbox/confidence/language/blocks/lines/words 粒度）；
    `lingua-ocr` crate（`OcrProvider` trait + Tesseract CLI 实现 +
    HTTP sidecar 实现）；`lingua-platform::capture`（macOS 走系统
-   `screencapture` CLI，屏幕录制权限 FFI 预检/请求，截图即读即删）；
+   `screencapture` CLI，屏幕录制权限 FFI 预检/请求，截图即读即删；
+   Windows 走 GDI BitBlt——物理像素、无需权限，输出前强制
+   不透明以免 PNG 在 webview 里透明渲染）；
    **快照式选区 overlay**（`ocr.html` 入口）：start 时先截主显示器
    整屏存入内存会话，overlay 显示这张冻结截图，用户在图上框选
-   （拖拽、Esc/右键取消、误点不退出）；按「CSS 像素 = 逻辑点 ×
-   会话缩放比」换算像素坐标，`crop_image`（image crate，PNG）在
-   快照上裁剪后送 OCR。不依赖窗口透明 / macOSPrivateApi，遮罩也
-   不会被截进图。pipeline：裁剪 → OCR → 走现有 Router/Engine 翻译
-   → Popup。
-2. **未真机人工验证**；需要授予「屏幕录制」权限（权限预检 +
-   系统授权框已接）。
+   （拖拽、Esc/右键取消、误点不退出）；裁剪缩放比按「截图像素 /
+   前端上报的 overlay CSS 视口」自校准（HiDPI / 显示器缩放下
+   不依赖 Rust 侧对 monitor 尺寸的推断），按比例换算像素坐标，
+   `crop_image`（image crate，PNG）在快照上裁剪后送 OCR。
+   不依赖窗口透明 / macOSPrivateApi，遮罩也不会被截进图。
+   pipeline：裁剪 → OCR → 走现有 Router/Engine 翻译 → Popup。
+2. **未真机人工验证**（macOS 与 Windows 均需 `pnpm tauri dev` 走一遍）；
+   macOS 需要授予「屏幕录制」权限（权限预检 + 系统授权框已接），
+   Windows 无需权限。
 3. Tesseract 中文识别需额外语言包（`brew install tesseract-lang`），
    且 Phase 5 未传 `-l` 语言参数（自动检测由翻译端处理）。
 4. PaddleOCR 以 sidecar 形式接入（`scripts/paddleocr_server.py`，
    需自行安装 paddleocr/paddlepaddle）；ONNX 内嵌推理未做。
 5. 图片预处理（二值化/放大）为空操作；「OCR → 原位置覆盖翻译」
    依赖的 bbox 数据已保留，实现留到后续阶段。
-6. 多显示器：overlay 目前只铺主显示器；`ocr_history` 留到 Phase 8。
+6. 多显示器：快照与 overlay 均跟随光标所在显示器（截图与选区坐标
+   同屏对齐，混合 DPI 也不串屏）；跨多屏拼接成一张大截图未做；
+   `ocr_history` 留到 Phase 8。
 
 ## 10. Phase 6 待办（下一步）
 

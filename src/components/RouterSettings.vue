@@ -151,7 +151,7 @@ onMounted(() => {
             />
           </n-form-item>
           <n-form-item
-            :label="ocrProvider === 'http' ? 'OCR 服务地址（PaddleOCR sidecar 契约）' : 'tesseract 路径（brew install tesseract）'"
+            :label="ocrProvider === 'http' ? 'OCR 服务地址（PaddleOCR sidecar 契约）' : 'tesseract 路径（macOS: brew install tesseract；Windows: winget install UB-Mannheim.TesseractOCR）'"
             style="flex: 2"
           >
             <n-input

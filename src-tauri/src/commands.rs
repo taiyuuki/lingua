@@ -729,7 +729,9 @@ pub async fn get_ocr_background(app: tauri::AppHandle) -> Result<Option<String>,
     crate::ocr::current_background(&app)
 }
 
-/// 用户框选完成：坐标为全局逻辑点（overlay CSS 像素）。
+/// 用户框选完成：坐标为 overlay CSS 像素；viewport 是 overlay 自身的
+/// CSS 视口尺寸 —— HiDPI 下像素↔CSS 换算的自校准基准（前端是唯一
+/// 可信的 CSS 尺寸来源，Rust 侧按 monitor 推断在缩放显示器上不可靠）。
 #[tauri::command]
 pub async fn perform_ocr_translation(
     app: tauri::AppHandle,
@@ -737,6 +739,8 @@ pub async fn perform_ocr_translation(
     y: f64,
     width: f64,
     height: f64,
+    viewport_width: f64,
+    viewport_height: f64,
 ) -> Result<(), AppError> {
     if width < 8.0 || height < 8.0 {
         return Err(AppError::InvalidInput("selection is too small".to_string()));
@@ -749,6 +753,7 @@ pub async fn perform_ocr_translation(
             width,
             height,
         },
+        (viewport_width, viewport_height),
     )
     .await;
     Ok(())

@@ -55,9 +55,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .on_window_event(|window, event| {
             // Popup 失焦自动隐藏 ——「点击外部隐藏」的实现。
+            // Windows 上点击弹窗内容会把焦点转给 WebView2 子窗口并
+            // 触发 Focused(false)，由 handle_focus_lost 裁决是否真失焦。
             if window.label() == POPUP_LABEL {
                 if let tauri::WindowEvent::Focused(false) = event {
-                    let _ = window.hide();
+                    popup::handle_focus_lost(window);
                 }
             }
         })

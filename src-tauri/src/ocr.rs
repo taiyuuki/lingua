@@ -56,19 +56,18 @@ pub fn ensure_overlay(app: &AppHandle) -> AppResult<WebviewWindow> {
     .map_err(platform_error)
 }
 
-/// 把 overlay 铺满主显示器并显示、聚焦。
-pub async fn show_overlay(app: &AppHandle) -> AppResult<()> {
+/// 把 overlay 铺满指定显示器并显示、聚焦。
+/// 与快照截的是同一块屏幕，选区坐标（overlay CSS）与截图天然对齐。
+pub async fn show_overlay(app: &AppHandle, monitor: &tauri::Monitor) -> AppResult<()> {
     let window = ensure_overlay(app)?;
-    if let Ok(Some(monitor)) = app.primary_monitor() {
-        let position = monitor.position();
-        let size = monitor.size();
-        window
-            .set_position(PhysicalPosition::new(position.x, position.y))
-            .map_err(platform_error)?;
-        window
-            .set_size(PhysicalSize::new(size.width, size.height))
-            .map_err(platform_error)?;
-    }
+    let position = monitor.position();
+    let size = monitor.size();
+    window
+        .set_position(PhysicalPosition::new(position.x, position.y))
+        .map_err(platform_error)?;
+    window
+        .set_size(PhysicalSize::new(size.width, size.height))
+        .map_err(platform_error)?;
     window.show().map_err(platform_error)?;
     window.set_focus().map_err(platform_error)?;
     Ok(())
@@ -98,14 +97,14 @@ pub fn build_ocr_provider(database: &Database) -> AppResult<Arc<dyn OcrProvider>
     }
 }
 
-/// 启动截图会话：截主显示器整屏 → 存入内存会话 → 显示选区 overlay。
+/// 启动截图会话：截光标所在显示器整屏 → 存入内存会话 →
+/// 在同一块屏幕上显示选区 overlay（多显示器下跟着光标走，
+/// 不再固定主显示器）。
 pub async fn start_capture(app: &AppHandle) -> AppResult<()> {
     let state = app.state::<AppState>();
 
-    let monitor = app
-        .primary_monitor()
-        .map_err(platform_error)?
-        .ok_or_else(|| AppError::Platform("no primary monitor found".to_string()))?;
+    let monitor = crate::popup::cursor_monitor(app)
+        .ok_or_else(|| AppError::Platform("no monitor found".to_string()))?;
     let position = monitor.position();
     let size = monitor.size();
     let monitor_rect = Rect {
@@ -149,7 +148,7 @@ pub async fn start_capture(app: &AppHandle) -> AppResult<()> {
     app.emit_to(OVERLAY_LABEL, BACKGROUND_UPDATED_EVENT, ())
         .map_err(platform_error)?;
 
-    show_overlay(app).await
+    show_overlay(app, &monitor).await
 }
 
 /// 当前会话的整屏截图（data URL），overlay 用它做选区背景。
@@ -165,8 +164,9 @@ pub fn current_background(app: &AppHandle) -> AppResult<Option<String>> {
 }
 
 /// 完整 OCR 翻译流程；失败以 popup 错误态呈现。
-pub async fn run_ocr_pipeline(app: AppHandle, rect: Rect) {
-    if let Err(error) = run(&app, rect).await {
+/// `viewport` 是 overlay 的 CSS 视口尺寸（HiDPI 自校准基准）。
+pub async fn run_ocr_pipeline(app: AppHandle, rect: Rect, viewport: (f64, f64)) {
+    if let Err(error) = run(&app, rect, viewport).await {
         tracing::warn!(error = %error, "ocr pipeline failed");
         let popup_state = PopupState::Error {
             kind: error.kind().to_string(),
@@ -178,13 +178,15 @@ pub async fn run_ocr_pipeline(app: AppHandle, rect: Rect) {
     }
 }
 
-async fn run(app: &AppHandle, rect: Rect) -> AppResult<()> {
+async fn run(app: &AppHandle, rect: Rect, viewport: (f64, f64)) -> AppResult<()> {
     // 1. 立即隐藏 overlay（屏幕截图已在会话里，不再引用真实屏幕）。
     hide_overlay(app)?;
 
     let state = app.state::<AppState>();
 
-    // 2. 取出快照会话，把逻辑坐标换算成像素坐标并裁剪。
+    // 2. 取出快照会话，把 CSS 坐标换算成像素坐标并裁剪。
+    //    缩放比 = 截图像素 / overlay CSS 视口；视口由前端上报
+    //    （缩放显示器上唯一可信的来源），非法时退回 monitor 逻辑尺寸。
     let session = {
         let mut guard = state
             .ocr
@@ -194,8 +196,18 @@ async fn run(app: &AppHandle, rect: Rect) -> AppResult<()> {
     }
     .ok_or_else(|| AppError::InvalidInput("no active OCR capture session".to_string()))?;
 
-    let scale_x = f64::from(session.image.width) / session.logical_width;
-    let scale_y = f64::from(session.image.height) / session.logical_height;
+    let logical_width = if viewport.0.is_finite() && viewport.0 >= 1.0 {
+        viewport.0
+    } else {
+        session.logical_width
+    };
+    let logical_height = if viewport.1.is_finite() && viewport.1 >= 1.0 {
+        viewport.1
+    } else {
+        session.logical_height
+    };
+    let scale_x = f64::from(session.image.width) / logical_width;
+    let scale_y = f64::from(session.image.height) / logical_height;
     let px_x = ((rect.x * scale_x).round() as i64).clamp(0, i64::from(session.image.width)) as u32;
     let px_y = ((rect.y * scale_y).round() as i64).clamp(0, i64::from(session.image.height)) as u32;
     let px_width = ((rect.width * scale_x).round() as u32).min(session.image.width - px_x);

@@ -9,7 +9,8 @@ import {
 
 // 快照式选区：整屏截图由后端在 start_ocr_capture 时截好，
 // 这里把截图铺满窗口作为背景，用户在「冻结的屏幕」上框选。
-// 坐标为 CSS 像素 = 逻辑点，后端按会话缩放比换算成像素裁剪。
+// 坐标为 CSS 像素；上报时连同窗口 CSS 视口一起传给后端，
+// 后端按「截图像素 / 视口」自校准缩放比（HiDPI 下不用猜）。
 interface Rect {
   x: number;
   y: number;
@@ -73,7 +74,14 @@ function onMouseUp(): void {
   if (width < 8 || height < 8) {
     return; // 误点：保持 overlay 等待重新选择
   }
-  void performOcrTranslation(x, y, width, height);
+  void performOcrTranslation(
+    x,
+    y,
+    width,
+    height,
+    window.innerWidth,
+    window.innerHeight,
+  );
 }
 
 function onKeyDown(event: KeyboardEvent): void {

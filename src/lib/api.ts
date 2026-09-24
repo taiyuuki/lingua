@@ -246,8 +246,17 @@ export async function performOcrTranslation(
   y: number,
   width: number,
   height: number,
+  viewportWidth: number,
+  viewportHeight: number,
 ): Promise<void> {
-  await invoke("perform_ocr_translation", { x, y, width, height });
+  await invoke("perform_ocr_translation", {
+    x,
+    y,
+    width,
+    height,
+    viewportWidth,
+    viewportHeight,
+  });
 }
 
 export async function cancelOcr(): Promise<void> {

@@ -27,8 +27,9 @@ pub enum PopupState {
     },
 }
 
-/// 一次 OCR 截图会话：整屏快照（内存中，不落盘）+ 逻辑尺寸，
-/// 选区坐标（逻辑点）按 `像素 / 逻辑` 缩放比换算后在快照上裁剪。
+/// 一次 OCR 截图会话：整屏快照（内存中，不落盘）+ monitor 逻辑尺寸。
+/// 裁剪缩放比的首选基准是前端上报的 overlay CSS 视口（HiDPI 自校准），
+/// monitor 逻辑尺寸只在前端上报缺失/非法时兜底。
 pub struct OcrSession {
     pub image: OcrImage,
     pub background_data_url: String,

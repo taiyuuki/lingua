@@ -15,7 +15,7 @@
 lingua/
 ├── crates/                  # Rust workspace（业务核心，全部平台无关）
 │   ├── lingua-core/         # 领域模型：AppError / Language / SelectedText / Translation*
-│   ├── lingua-platform/     # 平台抽象：SelectionProvider、macOS AX/剪贴板实现、光标定位
+│   ├── lingua-platform/     # 平台抽象：SelectionProvider、macOS AX 与 Windows UIA/剪贴板实现、GDI 截图
 │   ├── lingua-ai/           # AI 抽象：AIProvider trait、OpenAI-compatible 实现、AIRouter 任务路由
 │   ├── lingua-translation/  # Translation Engine：词典优先路由 + prompts/ 模板
 │   ├── lingua-dictionary/   # DictionaryProvider trait、SQLite 词典、TSV 导入器
@@ -40,13 +40,15 @@ lingua/
    模型 / API Key，Key 存入系统钥匙串），可用「测试」按钮做连接检查；
    在「路由与快捷键」里选默认 Provider / 翻译任务 Provider / 目标语言。
 2. 在任意应用中选中文本，按 `alt+t`（可在设置里改）。
-3. 翻译结果在屏幕中央的 Popup 中显示；`Esc` 或点击外部关闭。
+3. 翻译结果在光标所在屏幕居中的 Popup 中显示（多显示器跟随光标）；
+   `Esc` 或点击外部关闭。
 4. 主窗口「截图翻译」按钮 → 在屏幕上拖拽框选 → 识别的文字自动走
    AI 翻译并在 Popup 显示。OCR 引擎在「路由与快捷键」里配置
    （默认本机 tesseract；PaddleOCR 走 `scripts/paddleocr_server.py` sidecar）。
 5. （可选）在「词典」卡片导入 TSV 词典：翻译单词时优先命中本地词典，
    Popup 显示词性、释义、例句。格式说明见导入表单内的提示。
-4. macOS 首次使用需在「系统设置 → 隐私与安全性 → 辅助功能」授权本应用。
+6. macOS 首次使用需在「系统设置 → 隐私与安全性 → 辅助功能」授权本应用
+   （Windows 划词与截图无需任何系统授权）。
 
 ## 环境要求
 
@@ -54,7 +56,10 @@ lingua/
 - Node.js 20.19+ / 22.12+，包管理器用 **pnpm**
 - macOS：Xcode Command Line Tools；OCR 需要 `brew install tesseract`
   （或用 PaddleOCR sidecar），并授予「屏幕录制」权限
-- Windows：MSVC 工具链 + WebView2（Win11 自带）
+- Windows：MSVC 工具链 + WebView2（Win11 自带）；OCR 建议
+  `winget install UB-Mannheim.TesseractOCR`，在「路由与快捷键」里
+  把 tesseract 路径指向安装目录（如
+  `C:\Program Files\Tesseract-OCR\tesseract.exe`）
 - Linux：`webkit2gtk-4.1`、`libappindicator` 等开发包（见 Tauri 官方指引）
 
 ## 常用命令
