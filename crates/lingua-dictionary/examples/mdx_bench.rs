@@ -10,7 +10,7 @@ use lingua_dictionary::mdx::MdxFile;
 use lingua_database::Database;
 use std::time::Instant;
 
-const BATCH: usize = 5000;
+const BATCH: usize = 5_000;
 
 fn main() {
     let path = std::env::args()
@@ -25,7 +25,12 @@ fn main() {
 
     let db_path = std::env::temp_dir().join("lingua-mdx-bench.sqlite3");
     let _ = std::fs::remove_file(&db_path);
-    let database = Database::open(&db_path).expect("open db");
+    // MEMDB=1 时写内存库：分离磁盘 I/O 与 CPU 成本。
+    let database = if std::env::var_os("MEMDB").is_some() {
+        Database::open_in_memory().expect("open mem db")
+    } else {
+        Database::open(&db_path).expect("open db")
+    };
     database.migrate().expect("migrate");
     let meta = lingua_database::DictionaryMeta {
         id: "bench".into(),

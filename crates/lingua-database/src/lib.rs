@@ -57,6 +57,14 @@ impl Database {
     fn init(conn: Connection) -> AppResult<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(db_err)?;
+        // WAL 配 NORMAL：提交不再逐次 fsync。词典缓存可重导，
+        // 断电最多丢最后几笔写入，换大批量导入的提交速度。
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(db_err)?;
+        // 页缓存 64MB（默认 ~2MB）：百万级词条导入时 lemma 唯一索引
+        // 按近似乱序写入，小缓存会持续换页，这是导入耗时的主因。
+        conn.pragma_update(None, "cache_size", "-65536")
+            .map_err(db_err)?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(db_err)?;
         conn.busy_timeout(Duration::from_secs(5)).map_err(db_err)?;
