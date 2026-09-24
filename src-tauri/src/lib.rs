@@ -14,15 +14,29 @@ use lingua_core::AppError;
 use lingua_database::Database;
 use state::AppState;
 use tauri::Manager;
+use tauri::menu::{CheckMenuItem, MenuBuilder, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutEvent, ShortcutState};
 
 /// Popup 窗口的固定 label，commands 与窗口事件里共用。
 pub const POPUP_LABEL: &str = "popup";
+/// 主窗口的固定 label（与 tauri.conf.json 一致）。
+pub const MAIN_LABEL: &str = "main";
+
+/// 托盘状态：开机自启勾选项（设置页开关与托盘菜单双向同步用）。
+pub struct TrayState {
+    pub autostart_item: std::sync::Mutex<CheckMenuItem<tauri::Wry>>,
+}
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             init_tracing();
             tracing::info!(
@@ -51,10 +65,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // 全局快捷键：从 settings 读取（默认 alt+t），触发翻译 pipeline。
             register_shortcut_from_settings(app.handle(), &database)?;
 
+            setup_tray(app)?;
+
             tracing::info!("lingua ready");
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 关闭主窗口 = 隐藏到托盘（划词 / 截图 / Popup 继续可用）；
+            // 退出走托盘菜单。
+            if window.label() == MAIN_LABEL {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
             // Popup 失焦自动隐藏 ——「点击外部隐藏」的实现。
             // Windows 上点击弹窗内容会把焦点转给 WebView2 子窗口并
             // 触发 Focused(false)，由 handle_focus_lost 裁决是否真失焦。
@@ -98,6 +122,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::ocr_retry_available,
             commands::retry_ocr_with_vision,
             commands::ocr_source_info,
+            commands::autostart_enabled,
+            commands::set_autostart,
         ])
         .run(tauri::generate_context!())?;
     Ok(())
@@ -168,6 +194,117 @@ fn ocr_shortcut_handler(app: &tauri::AppHandle, _shortcut: &Shortcut, event: Sho
             }
         });
     }
+}
+
+/// 建托盘：常驻入口（显示主窗口 / 截图翻译 / 开机自启 / 退出）。
+/// 左键单击 = 显示主窗口；菜单里退出是唯一退出路径
+/// （关闭主窗口只是隐藏到托盘）。
+fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let autostart_item = CheckMenuItem::with_id(
+        app,
+        "autostart",
+        "开机自启",
+        true,
+        app.autolaunch().is_enabled().unwrap_or(false),
+        None::<&str>,
+    )?;
+    let menu = MenuBuilder::new(app)
+        .item(&MenuItem::with_id(
+            app,
+            "show",
+            "显示主窗口",
+            true,
+            None::<&str>,
+        )?)
+        .item(&MenuItem::with_id(
+            app,
+            "capture",
+            "截图翻译",
+            true,
+            None::<&str>,
+        )?)
+        .separator()
+        .item(&autostart_item)
+        .separator()
+        .item(&MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?)
+        .build()?;
+
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| AppError::Platform("no default window icon embedded".to_string()))?;
+
+    TrayIconBuilder::with_id("main-tray")
+        .icon(icon)
+        .tooltip("Lingua")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "capture" => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = ocr::start_capture(&app).await {
+                        tracing::warn!(error = %error, "tray capture failed to start");
+                    }
+                });
+            }
+            // CheckMenuItem 被点击时自行翻转勾选；以翻转后的状态为准
+            // 同步到 autostart 插件（设置页开关走 set_autostart 反向同步）。
+            "autostart" => {
+                let checked = app
+                    .try_state::<TrayState>()
+                    .and_then(|state| {
+                        state
+                            .autostart_item
+                            .lock()
+                            .ok()
+                            .and_then(|item| item.is_checked().ok())
+                    })
+                    .unwrap_or(false);
+                if let Err(error) = apply_autostart(app, checked) {
+                    tracing::warn!(error = %error, "failed to toggle autostart from tray");
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+
+    app.manage(TrayState {
+        autostart_item: std::sync::Mutex::new(autostart_item),
+    });
+    Ok(())
+}
+
+/// 显示并聚焦主窗口（托盘左键 / 菜单共用）。
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// 把开机自启状态写入 autostart 插件（注册表 / LaunchAgent）。
+fn apply_autostart(app: &tauri::AppHandle, enabled: bool) -> lingua_core::AppResult<()> {
+    let autostart = app.autolaunch();
+    let result = if enabled {
+        autostart.enable()
+    } else {
+        autostart.disable()
+    };
+    result.map_err(|error| AppError::Platform(error.to_string()))
 }
 
 /// 把任意 `std::error::Error` 收敛为 [`AppError::Platform`]，

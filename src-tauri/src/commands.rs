@@ -846,7 +846,7 @@ pub async fn retry_ocr_with_vision(app: tauri::AppHandle) -> Result<(), AppError
 }
 
 /// 最近一次截图翻译的识别来源（引擎 / 路径 / 置信度 / 兜底说明）；
-/// 划词翻译结果为 `None`。用于区分「识别错了」和「Vision 没触发」。
+/// 划词翻译结果为 `None`。用于区分「识别错了」与「Vision 没触发」。
 #[tauri::command]
 pub async fn ocr_source_info(
     state: tauri::State<'_, AppState>,
@@ -856,4 +856,27 @@ pub async fn ocr_source_info(
         .lock()
         .map(|guard| guard.clone())
         .unwrap_or(None))
+}
+
+// ---------- 托盘 / 开机自启 ----------
+
+/// 开机自启状态（托盘勾选与设置页开关共用）。
+#[tauri::command]
+pub async fn autostart_enabled(app: tauri::AppHandle) -> Result<bool, AppError> {
+    use tauri_plugin_autostart::ManagerExt;
+    Ok(app.autolaunch().is_enabled().unwrap_or(false))
+}
+
+/// 设置开机自启；同步托盘菜单的勾选项（两个入口双向一致）。
+#[tauri::command]
+pub async fn set_autostart(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::TrayState>,
+    enabled: bool,
+) -> Result<(), AppError> {
+    crate::apply_autostart(&app, enabled)?;
+    if let Ok(item) = state.autostart_item.lock() {
+        let _ = item.set_checked(enabled);
+    }
+    Ok(())
 }

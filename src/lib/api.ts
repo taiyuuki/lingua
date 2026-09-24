@@ -305,6 +305,16 @@ export async function ocrSourceInfo(): Promise<OcrSourceInfo | null> {
   return invoke<OcrSourceInfo | null>("ocr_source_info");
 }
 
+/** 开机自启状态（托盘菜单与设置页开关共用）。 */
+export async function autostartEnabled(): Promise<boolean> {
+  return invoke<boolean>("autostart_enabled");
+}
+
+/** 设置开机自启（同步托盘菜单勾选）。 */
+export async function setAutostart(enabled: boolean): Promise<void> {
+  await invoke("set_autostart", { enabled });
+}
+
 export async function listDictionaries(): Promise<DictionaryInfoDto[]> {
   return invoke<DictionaryInfoDto[]>("list_dictionaries");
 }

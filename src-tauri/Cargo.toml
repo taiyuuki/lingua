@@ -30,9 +30,10 @@ lingua-secrets = { workspace = true }
 lingua-translation = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tauri = { version = "2", features = ["macos-private-api"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-dialog = "2"
+tauri-plugin-autostart = "2"
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

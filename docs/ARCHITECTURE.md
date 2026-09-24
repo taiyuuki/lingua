@@ -92,7 +92,7 @@ pipeline::run_translation_pipeline
 
 | 窗口 | label | 入口 | 状态 |
 |------|-------|------|------|
-| 主窗口 | `main` | `tauri.conf.json` | ✅ Phase 0 |
+| 主窗口 | `main` | `tauri.conf.json` | ✅ Phase 0；关闭 = 隐藏到托盘（划词/截图继续可用），退出走托盘菜单 |
 | Popup | `popup` | `popup.html`（Vite 多入口） | ✅ 无边框、置顶（工具栏图钉可切换）、skip taskbar、失焦自动隐藏、光标所在显示器居中（边界钳制）；Esc 关闭 |
 | OCR 选区 | `ocr-selection` | Phase 5 | 计划：全屏透明 overlay，独立实现注意 Wayland 限制 |
 | Settings / Vocabulary | 复用 main 路由或独立窗口 | Phase 2/4 | 待定 |
@@ -122,7 +122,11 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
   （macOS CGEventPost 自带完整修饰键掩码，无此问题）。
 - **Wayland**：无可靠的全局选区坐标与全局快捷键方案，Popup 定位能力受限；
   Phase 10 按桌面环境（GNOME/KDE）逐个处理，X11 下能力完整。
-- **托盘/自启**：Phase 10（`tauri-plugin-autostart`、托盘能力）。
+- **托盘/自启**：已完成 —— 托盘（tauri 内建 `tray-icon`）常驻，
+  菜单含显示主窗口 / 截图翻译 / 开机自启（CheckMenuItem）/
+  退出；左键单击显示主窗。关闭主窗口只是隐藏（`CloseRequested`
+  拦截）。自启用 `tauri-plugin-autostart`，托盘勾选与设置页开关
+  经 `set_autostart` / 托盘事件双向同步。
 
 ## 6. Phase 1 已知限制
 
@@ -233,7 +237,7 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
 
 （定位：Vision LLM 不替代普通 OCR，只做高级 fallback —— 需求原话。）
 
-后续候选（按需排）：Phase 9 学习分析、托盘与自启（Phase 10）、
-SRS 复习（Phase 9）、ocr_history（Phase 8）。
-（图标与文件选择器、Windows 打包 nsis/msi 已完成：
+后续候选（按需排）：Phase 9 学习分析、SRS 复习（Phase 9）、
+ocr_history（Phase 8）。
+（图标与文件选择器、Windows 打包 nsis/msi、托盘与开机自启已完成：
 `pnpm tauri build` 产出 `target/release/bundle/` 下两种安装包。）

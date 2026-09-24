@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import {
   NAlert,
@@ -10,9 +10,11 @@ import {
   NInput,
   NSelect,
   NSpace,
+  NSwitch,
 } from "naive-ui";
 import { useProvidersStore } from "../stores/providers";
 import { SUPPORTED_TARGET_LANGUAGES, useSettingsStore } from "../stores/settings";
+import { autostartEnabled, setAutostart } from "../lib/api";
 
 const providersStore = useProvidersStore();
 const settingsStore = useSettingsStore();
@@ -67,6 +69,27 @@ onMounted(() => {
   void settingsStore.load();
   void providersStore.load();
 });
+
+// 开机自启由 autostart 插件管理（不落 settings 表），本地状态即可；
+// 托盘菜单的勾选项与这里双向同步。
+const autostart = ref(false);
+
+void autostartEnabled()
+  .then((enabled) => {
+    autostart.value = enabled;
+  })
+  .catch(() => {
+    // 读取失败保持关闭态。
+  });
+
+async function onAutostartChange(enabled: boolean): Promise<void> {
+  try {
+    await setAutostart(enabled);
+    autostart.value = enabled;
+  } catch {
+    autostart.value = !enabled; // 失败回弹。
+  }
+}
 </script>
 
 <template>
@@ -167,6 +190,17 @@ onMounted(() => {
               v-model:value="ocrShortcut"
               placeholder="alt+s"
             />
+          </n-form-item>
+          <n-form-item
+            label="开机自启"
+            style="flex: 1"
+          >
+            <n-space align="center">
+              <n-switch
+                :value="autostart"
+                @update:value="onAutostartChange"
+              />
+            </n-space>
           </n-form-item>
         </n-space>
 
