@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 lingua-core = { workspace = true }
+lingua-ai = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

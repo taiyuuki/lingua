@@ -2530,6 +2530,7 @@ name = "lingua-ocr"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "lingua-ai",
  "lingua-core",
  "reqwest",
  "serde",

@@ -9,7 +9,7 @@
 //!   401/403 → `Authentication`，其余 4xx/5xx 与协议解析失败 → `Provider`。
 
 use crate::config::ProviderConfig;
-use crate::types::{ChatMessage, ChatRequest, ChatResponse};
+use crate::types::{ChatMessage, ChatRequest, ChatResponse, VisionRequest};
 use lingua_core::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -127,7 +127,43 @@ impl crate::provider::AIProvider for OpenAiCompatibleProvider {
     async fn chat(&self, request: &ChatRequest) -> AppResult<ChatResponse> {
         let response = self.send(request, false).await?;
         let text = response_text(response).await?;
+        self.parse_completion(text)
+    }
 
+    async fn chat_stream(
+        &self,
+        request: &ChatRequest,
+        on_delta: &mut (dyn FnMut(String) + Send),
+    ) -> AppResult<ChatResponse> {
+        let response = self.send(request, true).await?;
+        Self::consume_sse(response, self.config.id.clone(), on_delta).await
+    }
+
+    /// 视觉理解：OpenAI 多模态消息格式——content 为分段数组，
+    /// 图片经 `image_url` 以 data URL（base64）内联。
+    async fn vision(&self, request: &VisionRequest) -> AppResult<ChatResponse> {
+        let data_url = format!("data:{};base64,{}", request.mime_type, request.image_base64);
+        let body = serde_json::json!({
+            "model": self.config.model,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": request.prompt },
+                    { "type": "image_url", "image_url": { "url": data_url } },
+                ],
+            }],
+        });
+        let mut body = body;
+        merge_extra_body(&mut body, self.config.extra_body.as_ref());
+        let response = self.send_body(body).await?;
+        let text = response_text(response).await?;
+        self.parse_completion(text)
+    }
+}
+
+impl OpenAiCompatibleProvider {
+    /// 解析 chat/completions 响应体（chat 与 vision 共用）。
+    fn parse_completion(&self, text: String) -> AppResult<ChatResponse> {
         let parsed: ChatCompletionsResponse =
             serde_json::from_str(&text).map_err(|error| AppError::Provider {
                 provider: self.config.id.clone(),
@@ -160,20 +196,8 @@ impl crate::provider::AIProvider for OpenAiCompatibleProvider {
         })
     }
 
-    async fn chat_stream(
-        &self,
-        request: &ChatRequest,
-        on_delta: &mut (dyn FnMut(String) + Send),
-    ) -> AppResult<ChatResponse> {
-        let response = self.send(request, true).await?;
-        Self::consume_sse(response, self.config.id.clone(), on_delta).await
-    }
-}
-
-impl OpenAiCompatibleProvider {
     /// 构造并发送 chat/completions 请求（chat 与 chat_stream 共用）。
     async fn send(&self, request: &ChatRequest, stream: bool) -> AppResult<reqwest::Response> {
-        let url = self.chat_url()?;
         let model = request
             .model
             .as_deref()
@@ -189,7 +213,12 @@ impl OpenAiCompatibleProvider {
         let mut body =
             serde_json::to_value(&typed).map_err(|error| AppError::Internal(error.to_string()))?;
         merge_extra_body(&mut body, self.config.extra_body.as_ref());
+        self.send_body(body).await
+    }
 
+    /// 发送已构造好的请求体（vision 的多模态消息不走 ChatCompletionsBody）。
+    async fn send_body(&self, body: serde_json::Value) -> AppResult<reqwest::Response> {
+        let url = self.chat_url()?;
         let mut http_request = self.http.post(url).json(&body);
         if let Some(key) = self.config.api_key.as_deref().filter(|key| !key.is_empty()) {
             http_request = http_request.bearer_auth(key);
@@ -414,6 +443,61 @@ mod tests {
         assert_eq!(response.content, "你好");
         assert_eq!(response.model.as_deref(), Some("m1"));
         assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[tokio::test]
+    async fn vision_sends_multimodal_message_and_parses_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        spawn_blocking(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 16384];
+            let mut request = String::new();
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.push_str(&String::from_utf8_lossy(&buffer[..read]));
+                if request.contains("image_url") {
+                    break;
+                }
+            }
+            assert!(
+                request.contains("\"image_url\""),
+                "vision request must use image_url content part: {request}"
+            );
+            assert!(
+                request.contains("data:image/png;base64,aGVsbG8="),
+                "image must be inlined as a data URL: {request}"
+            );
+            assert!(
+                request.contains("read the text"),
+                "prompt must be sent as the text part: {request}"
+            );
+            let body = r#"{"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            let _ = stream.flush();
+        });
+
+        let mut config = ProviderConfig::new("vision", "Vision");
+        config.base_url = Some(format!("http://{addr}/v1"));
+        let provider = OpenAiCompatibleProvider::new(config).unwrap();
+
+        let response = provider
+            .vision(&VisionRequest {
+                image_base64: "aGVsbG8=".into(), // base64("hello")
+                mime_type: "image/png".into(),
+                prompt: "read the text".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.content, "hi");
     }
 
     #[tokio::test]

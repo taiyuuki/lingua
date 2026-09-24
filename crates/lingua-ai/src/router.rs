@@ -19,6 +19,8 @@ use std::sync::Arc;
 pub enum AiTask {
     /// 划词翻译 / 文本翻译。
     Translate,
+    /// 视觉识别（截图 OCR 的高级 fallback，只派给 vision 能力 Provider）。
+    Vision,
 }
 
 /// Provider 注册表 + 路由表。
@@ -36,6 +38,15 @@ impl AIRouter {
 
     /// 解析某个任务应使用的 Provider：任务路由 → 默认 Provider。
     pub fn provider_for(&self, task: AiTask) -> AppResult<Arc<dyn AIProvider>> {
+        match task {
+            AiTask::Translate => self.provider_by_route(task),
+            // Vision 按能力分派：路由/默认指向的 Provider 不具备
+            // vision 能力时自动改派（见 vision_provider）。
+            AiTask::Vision => self.vision_provider(),
+        }
+    }
+
+    fn provider_by_route(&self, task: AiTask) -> AppResult<Arc<dyn AIProvider>> {
         let id = self
             .routes
             .get(&task)
@@ -50,6 +61,35 @@ impl AIRouter {
                 "provider `{id}` is routed but not registered; check Settings"
             ))
         })
+    }
+
+    /// Vision 分派：任务路由 / 默认 Provider 优先（须具备 vision 能力，
+    /// 不具备则告警跳过）；否则在注册表里自动挑选第一个具备 vision
+    /// 能力的 Provider；一个都没有才报「未配置」。
+    fn vision_provider(&self) -> AppResult<Arc<dyn AIProvider>> {
+        if let Ok(candidate) = self.provider_by_route(AiTask::Vision) {
+            if candidate.capabilities().vision {
+                return Ok(candidate);
+            }
+            tracing::warn!(
+                provider = candidate.id(),
+                "routed/default provider lacks vision capability; scanning registered providers"
+            );
+        }
+        let mut ids: Vec<&String> = self.providers.keys().collect();
+        ids.sort();
+        for id in ids {
+            if let Some(provider) = self.providers.get(id)
+                && provider.capabilities().vision
+            {
+                return Ok(provider.clone());
+            }
+        }
+        Err(AppError::InvalidInput(
+            "no vision-capable provider is configured; add one in Settings and enable its \
+             vision capability"
+                .to_string(),
+        ))
     }
 
     /// 已注册的 Provider id 列表（调试与设置界面用）。
@@ -113,12 +153,16 @@ mod tests {
     use crate::types::{ChatMessage, ChatRequest, ChatResponse};
     use lingua_core::AppResult;
 
-    struct NamedProvider(String);
+    struct NamedProvider(String, Option<crate::types::ProviderCapabilities>);
 
     #[async_trait::async_trait]
     impl AIProvider for NamedProvider {
         fn id(&self) -> &str {
             &self.0
+        }
+
+        fn capabilities(&self) -> crate::types::ProviderCapabilities {
+            self.1.unwrap_or_default()
         }
 
         async fn chat(&self, request: &ChatRequest) -> AppResult<ChatResponse> {
@@ -130,11 +174,27 @@ mod tests {
         }
     }
 
+    /// 不带能力参数的 Provider（trait 默认能力：chat 开、vision 关）。
+    fn named(id: &str) -> NamedProvider {
+        NamedProvider(id.into(), None)
+    }
+
+    fn vision_only(id: &str) -> NamedProvider {
+        NamedProvider(
+            id.into(),
+            Some(crate::types::ProviderCapabilities {
+                chat: false,
+                translate: false,
+                vision: true,
+            }),
+        )
+    }
+
     #[test]
     fn routes_to_task_provider_then_default() {
         let router = AIRouter::builder()
-            .register(NamedProvider("cloud".into()))
-            .register(NamedProvider("local".into()))
+            .register(named("cloud"))
+            .register(named("local"))
             .with_default("local")
             .route(AiTask::Translate, "cloud")
             .build();
@@ -149,7 +209,7 @@ mod tests {
     #[test]
     fn falls_back_to_default_when_no_route() {
         let router = AIRouter::builder()
-            .register(NamedProvider("local".into()))
+            .register(named("local"))
             .with_default("local")
             .build();
 
@@ -171,7 +231,7 @@ mod tests {
     #[test]
     fn route_to_unregistered_provider_errors_at_dispatch() {
         let router = AIRouter::builder()
-            .register(NamedProvider("local".into()))
+            .register(named("local"))
             .with_default("local")
             .route(AiTask::Translate, "ghost")
             .build();
@@ -184,7 +244,7 @@ mod tests {
     #[tokio::test]
     async fn chat_dispatches_through_router() {
         let router = AIRouter::builder()
-            .register(NamedProvider("cloud".into()))
+            .register(named("cloud"))
             .with_default("cloud")
             .build();
 
@@ -209,5 +269,47 @@ mod tests {
             serde_json::to_value(AiTask::Translate).unwrap(),
             "translate"
         );
+        assert_eq!(serde_json::to_value(AiTask::Vision).unwrap(), "vision");
+    }
+
+    #[test]
+    fn vision_route_to_capable_provider_wins() {
+        let router = AIRouter::builder()
+            .register(vision_only("eye"))
+            .register(named("plain"))
+            .route(AiTask::Vision, "eye")
+            .build();
+        assert_eq!(router.provider_for(AiTask::Vision).unwrap().id(), "eye");
+    }
+
+    #[test]
+    fn vision_route_to_incapable_provider_falls_back_to_scan() {
+        let router = AIRouter::builder()
+            .register(named("plain"))
+            .register(vision_only("eye"))
+            .route(AiTask::Vision, "plain")
+            .build();
+        // 路由指向的 Provider 不具备视觉能力：自动改派，而不是报错。
+        assert_eq!(router.provider_for(AiTask::Vision).unwrap().id(), "eye");
+    }
+
+    #[test]
+    fn vision_auto_picks_capable_provider_without_route() {
+        let router = AIRouter::builder()
+            .register(named("plain"))
+            .register(vision_only("eye"))
+            .with_default("plain")
+            .build();
+        assert_eq!(router.provider_for(AiTask::Vision).unwrap().id(), "eye");
+    }
+
+    #[test]
+    fn vision_errors_when_no_provider_is_capable() {
+        let router = AIRouter::builder().register(named("plain")).build();
+        let Err(error) = router.provider_for(AiTask::Vision) else {
+            unreachable!("expected unconfigured vision error");
+        };
+        assert_eq!(error.kind(), "invalid_input");
+        assert!(error.to_string().contains("vision"));
     }
 }
