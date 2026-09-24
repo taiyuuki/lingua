@@ -67,42 +67,44 @@ onUnmounted(() => {
       </div>
     </template>
 
-    <!-- 翻译结果 -->
+    <!-- 翻译结果：内容整体滚动，操作按钮固定在底部 -->
     <template v-else-if="state.status === 'result'">
-      <div class="popup-section">
-        <p class="popup-source">
-          {{ state.sourceText }}
-        </p>
-        <div class="popup-meta">
-          <span
-            v-if="detectedLanguageLabel"
-            class="chip"
-          >{{ detectedLanguageLabel }}</span>
+      <div class="popup-scroll">
+        <div class="popup-section">
+          <p class="popup-source">
+            {{ state.sourceText }}
+          </p>
+          <div class="popup-meta">
+            <span
+              v-if="detectedLanguageLabel"
+              class="chip"
+            >{{ detectedLanguageLabel }}</span>
+          </div>
         </div>
-      </div>
 
-      <p class="popup-translation">
-        {{ state.translatedText }}
-      </p>
+        <p class="popup-translation">
+          {{ state.translatedText }}
+        </p>
 
-      <ul
-        v-if="state.alternatives.length > 0"
-        class="popup-alternatives"
-      >
-        <li
-          v-for="alternative in state.alternatives"
-          :key="alternative"
+        <ul
+          v-if="state.alternatives.length > 0"
+          class="popup-alternatives"
         >
-          {{ alternative }}
-        </li>
-      </ul>
+          <li
+            v-for="alternative in state.alternatives"
+            :key="alternative"
+          >
+            {{ alternative }}
+          </li>
+        </ul>
 
-      <p
-        v-if="state.explanation"
-        class="popup-explanation"
-      >
-        {{ state.explanation }}
-      </p>
+        <p
+          v-if="state.explanation"
+          class="popup-explanation"
+        >
+          {{ state.explanation }}
+        </p>
+      </div>
 
       <div class="popup-actions">
         <button

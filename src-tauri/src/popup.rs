@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
 
 /// 与前端 popup 样式约定一致的窗口尺寸（逻辑像素）。
 pub const POPUP_WIDTH: f64 = 420.0;
-pub const POPUP_HEIGHT: f64 = 280.0;
+pub const POPUP_HEIGHT: f64 = 340.0;
 /// Popup 事件通道（前端 `listen("popup://state")`）。
 pub const POPUP_EVENT: &str = "popup://state";
 

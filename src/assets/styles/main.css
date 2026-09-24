@@ -253,7 +253,20 @@ body {
   }
 }
 
+/* 内容滚动区：吃掉剩余空间，内容超长时整体滚动，
+   译文永远不会被 flex 压扁（操作按钮固定在底部）。 */
+.popup-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
 .popup-section {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -289,10 +302,11 @@ body {
   font-weight: 550;
   line-height: 1.5;
   user-select: text;
-  overflow-y: auto;
+  overflow-wrap: anywhere;
 }
 
 .popup-alternatives {
+  flex-shrink: 0;
   margin: 0;
   padding: 0 0 0 18px;
   color: var(--color-text-secondary);
@@ -300,6 +314,7 @@ body {
 }
 
 .popup-explanation {
+  flex-shrink: 0;
   margin: 0;
   padding: 8px 10px;
   border-left: 2px solid var(--color-border);
@@ -309,7 +324,7 @@ body {
 }
 
 .popup-actions {
-  margin-top: auto;
+  flex-shrink: 0;
   display: flex;
   gap: 8px;
 }
