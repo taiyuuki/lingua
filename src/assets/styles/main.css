@@ -68,6 +68,10 @@ body {
   height: 100vh;
 }
 
+.app-shell {
+  display: flex;
+}
+
 .app-sidebar {
   width: 188px;
   flex-shrink: 0;
