@@ -36,6 +36,7 @@ pub fn ensure_window(app: &AppHandle) -> AppResult<WebviewWindow> {
     .title("Lingua")
     .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
     .decorations(false)
+    .transparent(true) // 圆角：页面根节点 border-radius 裁剪（需 macOSPrivateApi）
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(false)

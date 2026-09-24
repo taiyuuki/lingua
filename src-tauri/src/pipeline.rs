@@ -24,6 +24,8 @@ pub const SETTINGS_DEFAULT_PROVIDER: &str = "ai.default_provider_id";
 pub const SETTINGS_ROUTE_TRANSLATE: &str = "router.task.translate";
 pub const SETTINGS_TARGET_LANGUAGE: &str = "translation.target_language";
 pub const SETTINGS_SHORTCUT: &str = "shortcut.translate";
+pub const SETTINGS_UI_THEME: &str = "ui.theme";
+pub const DEFAULT_UI_THEME: &str = "dark";
 pub const DEFAULT_SHORTCUT: &str = "alt+t";
 pub const DEFAULT_TARGET_LANGUAGE: &str = "zh";
 
@@ -177,6 +179,14 @@ pub fn read_target_language_code(database: &Database) -> String {
         .flatten()
         .and_then(|value| value.as_str().map(str::to_string))
         .unwrap_or_else(|| DEFAULT_TARGET_LANGUAGE.to_string())
+}
+
+/// 界面主题（light | dark）；非法值回退 dark。
+pub fn read_ui_theme(database: &Database) -> String {
+    match read_setting(database, SETTINGS_UI_THEME).as_deref() {
+        Some("light") => "light".to_string(),
+        _ => DEFAULT_UI_THEME.to_string(),
+    }
 }
 
 pub fn read_shortcut(database: &Database) -> String {

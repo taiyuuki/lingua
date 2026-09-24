@@ -1,0 +1,7 @@
+/* Popup 窗口页面本身透明：圆角由 .popup-root 提供（窗口 transparent）。
+   注意：必须覆盖 main.css 里 body 的不透明背景。 */
+html,
+body,
+#popup {
+  background: transparent;
+}

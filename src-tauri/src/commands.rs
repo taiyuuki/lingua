@@ -309,6 +309,8 @@ pub struct AppSettingsDto {
     /// 划词翻译的目标语言（BCP-47 基础码）。
     pub target_language: Language,
     pub shortcut: String,
+    /// 界面主题：light | dark。
+    pub ui_theme: String,
     /// OCR 引擎：`tesseract` | `http`。
     pub ocr_provider: String,
     pub ocr_tesseract_path: String,
@@ -329,6 +331,7 @@ pub async fn get_app_settings(
             ),
             target_language: Language::parse(&pipeline::read_target_language_code(&database)),
             shortcut: pipeline::read_shortcut(&database),
+            ui_theme: pipeline::read_ui_theme(&database),
             ocr_provider: pipeline::read_setting(&database, crate::ocr::SETTINGS_OCR_PROVIDER)
                 .unwrap_or_else(|| crate::ocr::OCR_PROVIDER_TESSERACT.to_string()),
             ocr_tesseract_path: pipeline::read_setting(
@@ -369,6 +372,10 @@ pub async fn save_app_settings(
                 database.set_setting(pipeline::SETTINGS_ROUTE_TRANSLATE, &serde_json::json!(id))?
             }
         }
+        database.set_setting(
+            pipeline::SETTINGS_UI_THEME,
+            &serde_json::json!(settings.ui_theme),
+        )?;
         database.set_setting(
             pipeline::SETTINGS_TARGET_LANGUAGE,
             &serde_json::json!(settings.target_language.code()),

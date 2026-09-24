@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
+  getAppSettings,
   hidePopup,
   latestPopupState,
   onPopupState,
+  onThemeChanged,
   saveToVocabulary,
   togglePopupPin,
   type PopupState,
 } from "../lib/api";
+import { applyTheme, normalizeTheme } from "../lib/theme";
 
 // 快照同款「事件 + 快照」双通道；窗口复用，靠通知保持最新状态。
 // 布局参考 Bob：顶部工具栏（置顶/收藏/复制原文）→ 原文区 → 译文卡片。
@@ -17,6 +20,7 @@ const copiedTranslation = ref(false);
 const saved = ref(false);
 const pinned = ref(true);
 let unlisten: (() => void) | null = null;
+let unlistenTheme: (() => void) | null = null;
 
 const engineLabel = computed(() =>
   state.value.status === "result" ? (state.value.dictionary?.source ?? "AI 翻译") : "",
@@ -78,6 +82,15 @@ function onKeydown(event: KeyboardEvent): void {
 
 onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
+  const stopTheme = await onThemeChanged((theme) => {
+    applyTheme(theme);
+  });
+  unlistenTheme = stopTheme;
+  try {
+    applyTheme(normalizeTheme((await getAppSettings()).uiTheme));
+  } catch {
+    applyTheme("dark");
+  }
   const stop = await onPopupState((next) => {
     state.value = next;
     copiedSource.value = false;
@@ -94,13 +107,17 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener("keydown", onKeydown);
   unlisten?.();
+  unlistenTheme?.();
 });
 </script>
 
 <template>
   <div class="popup-root">
     <!-- 工具栏：置顶 | 收藏 / 复制原文 -->
-    <div class="popup-toolbar">
+    <div
+      class="popup-toolbar"
+      data-tauri-drag-region
+    >
       <button
         class="tool-btn"
         :class="{ 'tool-active': pinned }"

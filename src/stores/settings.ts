@@ -1,12 +1,14 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
 import {
+  broadcastThemeChanged,
   getAppSettings,
   saveAppSettings,
   selectionPermissionStatus,
   type AppSettingsDto,
 } from "../lib/api";
 import { describeError } from "../lib/errors";
+import { applyTheme, normalizeTheme } from "../lib/theme";
 
 /**
  * 应用设置域状态：AI Router 路由（默认 / 翻译任务）+ 目标语言 + 全局快捷键。
@@ -35,6 +37,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const translateProviderId = ref<string>(""); // "" = 跟随默认
   const targetLanguage = ref("zh");
   const shortcut = ref("alt+t");
+  const uiTheme = ref("dark");
   const ocrProvider = ref("tesseract");
   const ocrTesseractPath = ref("tesseract");
   const ocrHttpUrl = ref("http://127.0.0.1:8433/ocr");
@@ -47,6 +50,8 @@ export const useSettingsStore = defineStore("settings", () => {
       translateProviderId.value = settings.translateProviderId ?? "";
       targetLanguage.value = settings.targetLanguage;
       shortcut.value = settings.shortcut;
+      uiTheme.value = normalizeTheme(settings.uiTheme);
+      applyTheme(uiTheme.value);
       ocrProvider.value = settings.ocrProvider;
       ocrTesseractPath.value = settings.ocrTesseractPath;
       ocrHttpUrl.value = settings.ocrHttpUrl;
@@ -71,11 +76,15 @@ export const useSettingsStore = defineStore("settings", () => {
         translateProviderId: translateProviderId.value === "" ? null : translateProviderId.value,
         targetLanguage: targetLanguage.value,
         shortcut: shortcut.value.trim() || "alt+t",
+        uiTheme: uiTheme.value,
         ocrProvider: ocrProvider.value,
         ocrTesseractPath: ocrTesseractPath.value.trim() || "tesseract",
         ocrHttpUrl: ocrHttpUrl.value.trim(),
       });
       saveMessage.value = "已保存";
+      applyTheme(uiTheme.value);
+      // 主窗口应用后广播，Popup 等其它窗口同步切换。
+      await broadcastThemeChanged(uiTheme.value);
     } catch (error) {
       saveError.value = describeError(error);
     } finally {
@@ -94,6 +103,7 @@ export const useSettingsStore = defineStore("settings", () => {
     translateProviderId,
     targetLanguage,
     shortcut,
+    uiTheme,
     ocrProvider,
     ocrTesseractPath,
     ocrHttpUrl,

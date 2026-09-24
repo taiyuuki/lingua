@@ -5,7 +5,7 @@
  * 必须经过这里；命令名、参数与返回结构的契约集中在一个文件里。
  */
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 
 export interface AppInfo {
   name: string;
@@ -59,6 +59,8 @@ export interface AppSettingsDto {
   translateProviderId: string | null;
   targetLanguage: string;
   shortcut: string;
+  /** 界面主题：light | dark（主窗口与 Popup 共用）。 */
+  uiTheme: string;
   ocrProvider: string;
   ocrTesseractPath: string;
   ocrHttpUrl: string;
@@ -197,6 +199,15 @@ export async function getOcrBackground(): Promise<string | null> {
 /** OCR 会话更新通知（每次开始截图都会触发）。返回取消订阅函数。 */
 export function onOcrBackgroundUpdated(handler: () => void): Promise<() => void> {
   return listen("ocr://background-updated", () => handler());
+}
+
+/** 主题变更广播：主窗口保存设置后发，所有窗口应用新主题。 */
+export async function broadcastThemeChanged(theme: string): Promise<void> {
+  await emit("theme://changed", theme);
+}
+
+export function onThemeChanged(handler: (theme: string) => void): Promise<() => void> {
+  return listen<string>("theme://changed", (event) => handler(event.payload));
 }
 
 export async function performOcrTranslation(

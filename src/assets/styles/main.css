@@ -1,4 +1,6 @@
-/* Lingua 设计令牌 —— 轻量桌面风格，不依赖 UI 组件库。 */
+/* Lingua 设计令牌 —— 轻量桌面风格，不依赖 UI 组件库。
+   主题：:root 为浅色，:root[data-theme="dark"] 为深色；
+   所有界面（主窗口 / Popup）只允许使用 --color-* 共享令牌。 */
 :root {
   color-scheme: light;
 
@@ -11,12 +13,32 @@
   --color-accent-hover: #4059e0;
   --color-danger: #d64545;
   --color-danger-bg: #fdf1f1;
+  --color-warn-bg: #fdf7ec;
+  --color-warn-text: #a06a1f;
+  --color-ok: #2e9e5b;
 
   --radius-md: 10px;
   --radius-sm: 6px;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", sans-serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #16181d;
+  --color-surface: #1f232a;
+  --color-border: #343a43;
+  --color-text: #e8eaed;
+  --color-text-secondary: #9aa0a6;
+  --color-accent: #7f97ff;
+  --color-accent-hover: #93a5ff;
+  --color-danger: #ff8a8a;
+  --color-danger-bg: #3a2727;
+  --color-warn-bg: #39301f;
+  --color-warn-text: #d8a657;
+  --color-ok: #5fbf87;
 }
 
 * {
@@ -118,8 +140,8 @@ body {
   margin: 0 0 12px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  background: #fdf7ec;
-  color: #a06a1f;
+  background: var(--color-warn-bg);
+  color: var(--color-warn-text);
   font-size: 13px;
 }
 
@@ -184,7 +206,8 @@ body {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   font: inherit;
   padding: 7px 10px;
   border: 1px solid var(--color-border);
@@ -195,7 +218,8 @@ body {
 }
 
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus {
   outline: 2px solid var(--color-accent);
   outline-offset: -1px;
   border-color: transparent;
@@ -213,7 +237,7 @@ body {
 }
 
 .save-ok {
-  color: #2e9e5b;
+  color: var(--color-ok);
   font-size: 13px;
 }
 
@@ -266,6 +290,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .provider-id {
@@ -298,33 +323,28 @@ body {
 }
 
 .test-ok {
-  color: #2e9e5b;
+  color: var(--color-ok);
 }
 
 .test-fail {
   color: var(--color-danger);
 }
 
-/* ---------- Popup 窗口（Bob 风格深色卡片） ---------- */
+/* ---------- Popup 窗口（Bob 风格卡片布局，随主题切换） ---------- */
 
 .popup-root {
-  --pd-bg: #212529;
-  --pd-card: #2b3036;
-  --pd-border: #3a4047;
-  --pd-text: #e8eaed;
-  --pd-sub: #9aa0a6;
-  --pd-accent: #7f97ff;
-
   height: 100vh;
   display: flex;
   flex-direction: column;
   padding: 8px 10px 6px;
-  background: var(--pd-bg);
-  color: var(--pd-text);
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 12px; /* 窗口本身 transparent，圆角裁掉直角边角 */
   overflow: hidden;
 }
 
-/* 工具栏 */
+/* 工具栏（同时是拖拽区：data-tauri-drag-region） */
 .popup-toolbar {
   display: flex;
   align-items: center;
@@ -340,7 +360,7 @@ body {
   appearance: none;
   border: none;
   background: transparent;
-  color: var(--pd-sub);
+  color: var(--color-text-secondary);
   width: 26px;
   height: 26px;
   border-radius: 6px;
@@ -357,8 +377,8 @@ body {
 }
 
 .tool-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--pd-text);
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+  color: var(--color-text);
 }
 
 .tool-btn:disabled {
@@ -367,7 +387,7 @@ body {
 }
 
 .tool-btn.tool-active {
-  color: var(--pd-accent);
+  color: var(--color-accent);
 }
 
 /* 内容滚动区 */
@@ -387,14 +407,14 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: var(--pd-sub);
+  color: var(--color-text-secondary);
 }
 
 .spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid var(--pd-border);
-  border-top-color: var(--pd-accent);
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: lingua-spin 0.8s linear infinite;
 }
@@ -407,10 +427,11 @@ body {
 
 /* 原文区 */
 .popup-source {
+  flex-shrink: 0; /* 内容超长时靠滚动区滚动，不允许被 flex 压扁 */
   margin: 0;
   font-size: 13px;
   line-height: 1.55;
-  color: var(--pd-text);
+  color: var(--color-text);
   max-height: 6.2em;
   overflow-y: auto;
   user-select: text;
@@ -427,16 +448,16 @@ body {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid var(--pd-border);
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+  border: 1px solid var(--color-border);
   font-size: 11px;
-  color: var(--pd-sub);
+  color: var(--color-text-secondary);
 }
 
 /* 结果卡片 */
 .result-card {
-  background: var(--pd-card);
-  border: 1px solid var(--pd-border);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 10px 12px;
   display: flex;
@@ -455,14 +476,14 @@ body {
 .result-engine {
   font-size: 12px;
   font-weight: 600;
-  color: var(--pd-accent);
+  color: var(--color-accent);
 }
 
 .popup-translation {
   margin: 0;
   font-size: 15.5px;
   line-height: 1.55;
-  color: var(--pd-text);
+  color: var(--color-text);
   user-select: text;
   overflow-wrap: anywhere;
 }
@@ -471,7 +492,7 @@ body {
   flex-shrink: 0;
   margin: 0;
   padding: 0 0 0 18px;
-  color: var(--pd-sub);
+  color: var(--color-text-secondary);
   font-size: 12.5px;
 }
 
@@ -479,10 +500,10 @@ body {
   flex-shrink: 0;
   margin: 0;
   padding: 8px 10px;
-  border-left: 2px solid var(--pd-border);
+  border-left: 2px solid var(--color-border);
   border-radius: 2px;
-  background: var(--pd-card);
-  color: var(--pd-sub);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
   font-size: 12.5px;
   user-select: text;
 }
@@ -506,13 +527,13 @@ body {
 
 .popup-dict-text {
   margin-left: 4px;
-  color: var(--pd-text);
+  color: var(--color-text);
 }
 
 .popup-dict-examples {
   margin: 2px 0 0;
   padding: 0 0 0 14px;
-  color: var(--pd-sub);
+  color: var(--color-text-secondary);
   font-size: 11.5px;
   font-style: italic;
 }
@@ -531,20 +552,20 @@ body {
 .popup-error-title {
   margin: 0;
   font-weight: 600;
-  color: #ff8a8a;
+  color: var(--color-danger);
 }
 
 .popup-error-message {
   margin: 0;
   font-size: 12.5px;
-  color: var(--pd-sub);
+  color: var(--color-text-secondary);
   max-width: 90%;
 }
 
 .popup-error-hint {
   margin: 0;
   font-size: 12px;
-  color: #d8a657;
+  color: var(--color-warn-text);
 }
 
 /* 底栏 */
@@ -557,8 +578,27 @@ body {
 
 .popup-brand {
   font-size: 11px;
-  color: var(--pd-sub);
+  color: var(--color-text-secondary);
   letter-spacing: 0.4px;
+}
+
+/* 生词本掌握度徽章（双主题可读） */
+.mastery-new {
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  color: var(--color-accent);
+  border-color: transparent;
+}
+
+.mastery-learning {
+  background: color-mix(in srgb, var(--color-warn-text) 16%, transparent);
+  color: var(--color-warn-text);
+  border-color: transparent;
+}
+
+.mastery-mastered {
+  background: color-mix(in srgb, var(--color-ok) 16%, transparent);
+  color: var(--color-ok);
+  border-color: transparent;
 }
 
 /* ---------- OCR 选区 overlay ---------- */
@@ -597,7 +637,7 @@ body {
   padding: 6px 14px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);
-  color: var(--color-text);
+  color: #1f2328;
   font-size: 12.5px;
   pointer-events: none;
 }

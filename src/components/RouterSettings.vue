@@ -2,7 +2,10 @@
 import { computed, onMounted } from "vue";
 import { storeToRefs } from "pinia";
 import { useProvidersStore } from "../stores/providers";
-import { SUPPORTED_TARGET_LANGUAGES, useSettingsStore } from "../stores/settings";
+import {
+  SUPPORTED_TARGET_LANGUAGES,
+  useSettingsStore,
+} from "../stores/settings";
 
 const providersStore = useProvidersStore();
 const settingsStore = useSettingsStore();
@@ -11,6 +14,7 @@ const {
   translateProviderId,
   targetLanguage,
   shortcut,
+  uiTheme,
   ocrProvider,
   ocrTesseractPath,
   ocrHttpUrl,
@@ -92,6 +96,18 @@ onMounted(() => {
               :value="lang.code"
             >
               {{ lang.label }}（{{ lang.code }}）
+            </option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>界面主题</span>
+          <select v-model="uiTheme">
+            <option value="dark">
+              深色
+            </option>
+            <option value="light">
+              浅色
             </option>
           </select>
         </label>
