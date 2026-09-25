@@ -496,7 +496,12 @@ function onToolbarMouseDown(event: MouseEvent): void {
             </svg>
           </button>
         </div>
-        <p class="popup-translation">
+        <!-- 译文行：词典命中时词条卡片即全部内容（译文行本就是首条
+             释义的纯文本，与卡片重复）；AI 结果才单独显示译文。 -->
+        <p
+          v-if="!state.dictionary"
+          class="popup-translation"
+        >
           {{ state.translatedText }}
         </p>
 
