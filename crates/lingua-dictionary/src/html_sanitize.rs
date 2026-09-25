@@ -171,8 +171,13 @@ fn sanitize_style(value: &str) -> String {
 }
 
 /// MDD 资源路径规范化：`\`→`/`、去前导分隔符、拒绝 `..` 穿越。
+/// 首尾的控制字符一并剥掉——MDict 行内资源用 `\x1E 名字 \x1F`
+/// 包裹（部分词典用 `\x02`），包裹符不属于文件名。
 pub fn normalize_resource_path(path: &str) -> Option<String> {
-    let trimmed = path.trim().trim_start_matches(['\\', '/']);
+    let trimmed = path
+        .trim()
+        .trim_matches(char::is_control)
+        .trim_start_matches(['\\', '/']);
     let normalized = trimmed.replace('\\', "/");
     if normalized.is_empty() {
         return None;
@@ -292,5 +297,16 @@ mod tests {
     fn file_scheme_prefix_is_treated_as_resource_path() {
         let out = sanitize_definition_html("<img src=\"file://dot.gif\">", "d1");
         assert!(out.contains("mdx-res://localhost/d1/dot.gif"), "{out}");
+    }
+
+    #[test]
+    fn mdict_control_wrapped_resource_names_are_unwrapped() {
+        // MDict 行内资源：\x1E 文件名 \x1F（插图版牛津的图片全是这种形式）。
+        let out = sanitize_definition_html(
+            "<img src=\"\u{1e}9DB12AFC.bmp\u{1f}\">",
+            "d1",
+        );
+        assert!(out.contains("mdx-res://localhost/d1/9DB12AFC.bmp"), "{out}");
+        assert!(!out.contains("%1E"), "{out}");
     }
 }
