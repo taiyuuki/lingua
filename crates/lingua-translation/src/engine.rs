@@ -133,12 +133,19 @@ impl TranslationEngine {
                 return None;
             }
         };
-        let usable: Vec<DictionaryEntry> = entries
+        // 两级过滤：优先「释义语言 == 目标语言」的词典；一本都不匹配时
+        // 回退到任意有释义的词典（词典命中比硬走 AI 有用；例如目标语言
+        // 切到英语时 en→zh 词典不该整体消失）。
+        let all: Vec<DictionaryEntry> = entries
             .into_iter()
-            .filter(|entry| {
-                entry.has_definitions() && entry.gloss_language == request.target_language
-            })
+            .filter(DictionaryEntry::has_definitions)
             .collect();
+        let usable: Vec<DictionaryEntry> = all
+            .iter()
+            .filter(|entry| entry.gloss_language == request.target_language)
+            .cloned()
+            .collect();
+        let usable = if usable.is_empty() { all } else { usable };
         let primary = usable.first().cloned()?;
         tracing::debug!(
             dictionaries = usable.len(),
@@ -430,8 +437,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gloss_language_mismatch_falls_back_to_ai() {
-        // 词典是 en→en（释义语言 != 目标语言 zh），不应被采用。
+    async fn gloss_language_mismatch_still_uses_dictionary() {
+        // 唯一的词典是 en→en（释义语言 != 目标语言 zh）：
+        // 两级过滤下仍采用词典结果，而不是硬走 AI。
         let database = lingua_database::Database::open_in_memory().unwrap();
         database.migrate().unwrap();
         database
@@ -450,8 +458,8 @@ mod tests {
         }))
         .with_dictionary(Some(Arc::new(SqliteDictionaryProvider::new(database))));
         let result = engine.translate(&request("ephemeral")).await.unwrap();
-        assert_eq!(result.translated_text, "从 AI 来的");
-        assert!(result.dictionaries.is_empty());
+        assert_eq!(result.translated_text, "brief");
+        assert_eq!(result.dictionaries.len(), 1);
     }
 
     #[tokio::test]

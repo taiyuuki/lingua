@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 lingua-ai = { workspace = true }
+oxideav-speex = "0.0"
 lingua-core = { workspace = true }
 lingua-database = { workspace = true }
 lingua-dictionary = { workspace = true }

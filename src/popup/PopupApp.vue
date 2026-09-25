@@ -67,7 +67,7 @@ function onDefinitionToggle(index: number, text: string): void {
 /** 富文本区点击：词条内链（entry:///#锚点/词头）与发音链接（资源
  *  音频，导入期由 sound:// 改写而来）；其余点击不拦截——文本区留给
  *  选择/复制。词典自带的 <script> 不执行，发音用原生 Audio 播放。 */
-const AUDIO_URL = /\.(mp3|wav|ogg|m4a)(\?|$)/i;
+const AUDIO_URL = /\.(mp3|wav|ogg|oga|m4a|aac|spx|opus|flac|webm)(\?|$)/i;
 let currentAudio: HTMLAudioElement | null = null;
 
 function onRichLinkClick(event: MouseEvent): void {

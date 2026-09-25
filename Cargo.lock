@@ -2534,6 +2534,7 @@ dependencies = [
  "lingua-platform",
  "lingua-secrets",
  "lingua-translation",
+ "oxideav-speex",
  "serde",
  "serde_json",
  "tauri",
@@ -3172,6 +3173,26 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "oxideav-core"
+version = "0.1.36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a78b502f679c580ceb7cc834d23f80821673b0a393a3083d54ef82668bb9c028"
+dependencies = [
+ "bytemuck",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "oxideav-speex"
+version = "0.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff2dc4e3957d399c39649695ed8dbb89909a42675542dce5b288e7e5e82af79f"
+dependencies = [
+ "oxideav-core",
 ]
 
 [[package]]

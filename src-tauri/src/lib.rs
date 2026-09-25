@@ -8,6 +8,7 @@ mod commands;
 mod ocr;
 mod pipeline;
 mod popup;
+mod speex;
 mod state;
 
 use lingua_core::AppError;
@@ -162,11 +163,29 @@ fn handle_mdx_resource(
     };
     let full_path = data_dir.join("mdx").join(dictionary_id).join(&resource);
     match std::fs::read(&full_path) {
-        Ok(bytes) => tauri::http::Response::builder()
-            .header("Content-Type", resource_content_type(&resource))
-            .header("Cache-Control", "max-age=86400")
-            .body(bytes)
-            .unwrap_or_else(|_| tauri::http::Response::new(Vec::new())),
+        Ok(bytes) => {
+            // .spx（Ogg/Speex）：浏览器不支持，就地转码 WAV。
+            let (bytes, content_type) = if resource
+                .rsplit('.')
+                .next()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("spx"))
+            {
+                match speex::speex_to_wav(&bytes) {
+                    Some(wav) => (wav, "audio/wav"),
+                    None => {
+                        tracing::warn!(resource = %resource, "speex decode failed");
+                        return not_found();
+                    }
+                }
+            } else {
+                (bytes, resource_content_type(&resource))
+            };
+            tauri::http::Response::builder()
+                .header("Content-Type", content_type)
+                .header("Cache-Control", "max-age=86400")
+                .body(bytes)
+                .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+        }
         Err(_) => not_found(),
     }
 }
