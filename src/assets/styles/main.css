@@ -693,13 +693,13 @@ body {
   border-bottom: 1px dotted currentColor;
 }
 
-/* 长释义折叠态（纯文本）：限 6 行，点击文本或「展开全部」展开 */
+/* 长释义折叠态（纯文本）：限 6 行，由「展开全部」按钮切换
+   （文本区留给选择/复制，不做点击切换） */
 .popup-dict-clamped {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 6;
   overflow: hidden;
-  cursor: pointer;
 }
 
 /* 长释义折叠态（富文本）：不用 -webkit-line-clamp——它要求
@@ -708,7 +708,6 @@ body {
 .popup-dict-rich-clamped {
   max-height: 9.2em;
   overflow: hidden;
-  cursor: pointer;
   -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent);
   mask-image: linear-gradient(to bottom, #000 78%, transparent);
 }

@@ -63,8 +63,9 @@ function onDefinitionToggle(index: number, text: string): void {
   expandedDefinitions.value = next;
 }
 
-/** 富文本区点击：词条内链（entry://）跳词，其余按折叠切换处理。 */
-function onRichClick(event: MouseEvent, index: number, text: string): void {
+/** 富文本区点击：只处理词条内链（entry://）跳词；
+ *  其余点击不拦截——文本区留给选择/复制，折叠只由按钮切换。 */
+function onRichLinkClick(event: MouseEvent): void {
   const anchor = (event.target as HTMLElement | null)?.closest?.(
     'a[href^="entry://"]',
   ) as HTMLAnchorElement | null;
@@ -72,9 +73,7 @@ function onRichClick(event: MouseEvent, index: number, text: string): void {
     event.preventDefault();
     const word = (anchor.getAttribute("href") ?? "").replace(/^entry:\/\//, "");
     void jumpToEntry(decodeURIComponent(word).trim());
-    return;
   }
-  onDefinitionToggle(index, text);
 }
 
 /** 内链跳词：命中则局部替换当前词条，未命中/失败静默保留。 */
@@ -526,7 +525,7 @@ function onToolbarMouseDown(event: MouseEvent): void {
                     && !expandedDefinitions.has(index),
                   'popup-dict-expanded': expandedDefinitions.has(index),
                 }]"
-                @click="onRichClick($event, index, definition.definition)"
+                @click="onRichLinkClick($event)"
                 v-html="definition.html"
               />
               <!-- eslint-enable vue/no-v-html -->
@@ -538,7 +537,6 @@ function onToolbarMouseDown(event: MouseEvent): void {
                     && !expandedDefinitions.has(index),
                   'popup-dict-expanded': expandedDefinitions.has(index),
                 }]"
-                @click="onDefinitionToggle(index, definition.definition)"
               >
                 <span
                   v-if="definition.partOfSpeech"
