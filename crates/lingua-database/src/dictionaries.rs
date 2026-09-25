@@ -57,8 +57,8 @@ impl Database {
         let mut conn = self.lock_conn()?;
         let tx = conn.transaction().map_err(db_err)?;
         tx.execute(
-            "INSERT INTO dictionaries (id, name, source_lang, gloss_lang)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO dictionaries (id, name, source_lang, gloss_lang, sort_order)
+             VALUES (?1, ?2, ?3, ?4, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM dictionaries))
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 source_lang = excluded.source_lang,
@@ -165,7 +165,7 @@ impl Database {
             .prepare(
                 "SELECT d.id, d.name, d.source_lang, d.gloss_lang,
                         (SELECT COUNT(*) FROM dictionary_entries e WHERE e.dictionary_id = d.id)
-                 FROM dictionaries d ORDER BY d.created_at, d.id",
+                 FROM dictionaries d ORDER BY d.sort_order, d.created_at, d.id",
             )
             .map_err(db_err)?;
         let rows = statement
@@ -184,6 +184,43 @@ impl Database {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(db_err)?;
         Ok(rows)
+    }
+
+    /// 手动排序：传入 id 依序得 1..n；未提到的词典排在它们之后、
+    /// 保持原相对顺序。单事务重写全表 sort_order。
+    pub fn reorder_dictionaries(&self, ordered_ids: &[String]) -> AppResult<()> {
+        let mut conn = self.lock_conn()?;
+        let existing: Vec<(String, i64)> = {
+            let mut statement = conn
+                .prepare("SELECT id, sort_order FROM dictionaries")
+                .map_err(db_err)?;
+            statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(db_err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(db_err)?
+        };
+        let position: std::collections::HashMap<&str, usize> = ordered_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (id.as_str(), index + 1))
+            .collect();
+        let tail_start = ordered_ids.len();
+
+        let tx = conn.transaction().map_err(db_err)?;
+        for (id, old_order) in existing {
+            let new_order = position
+                .get(id.as_str())
+                .copied()
+                .unwrap_or_else(|| tail_start + old_order.max(0) as usize + 1) as i64;
+            tx.execute(
+                "UPDATE dictionaries SET sort_order = ?2 WHERE id = ?1",
+                params![id, new_order],
+            )
+            .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(())
     }
 
     pub fn delete_dictionary(&self, id: &str) -> AppResult<bool> {
@@ -238,7 +275,7 @@ impl Database {
         if language.is_some() {
             sql.push_str(" AND d.source_lang = ?2");
         }
-        sql.push_str(" ORDER BY d.created_at, d.id");
+        sql.push_str(" ORDER BY d.sort_order, d.created_at, d.id");
         let mut statement = conn.prepare(&sql).map_err(db_err)?;
 
         let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(i64, DictionaryEntry)> {
@@ -412,6 +449,39 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].source, "Dict dict-a");
         assert_eq!(results[1].definitions[0].definition, "猫科动物");
+    }
+
+    #[test]
+    fn reorder_changes_list_and_lookup_order() {
+        let db = Database::open_in_memory().unwrap();
+        db.migrate().unwrap();
+        for id in ["a", "b", "c"] {
+            db.import_dictionary(&meta(id), &[entry("cat", id)]).unwrap();
+        }
+        // 初始按导入顺序。
+        assert_eq!(
+            db.list_dictionaries().unwrap().iter().map(|d| d.meta.id.clone()).collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
+        // 手动排序：b 提到最前。
+        db.reorder_dictionaries(&["b".into(), "c".into(), "a".into()])
+            .unwrap();
+        assert_eq!(
+            db.list_dictionaries().unwrap().iter().map(|d| d.meta.id.clone()).collect::<Vec<_>>(),
+            vec!["b", "c", "a"]
+        );
+        let results = db.lookup_entries("cat", None).unwrap();
+        assert_eq!(
+            results.iter().map(|e| e.source.clone()).collect::<Vec<_>>(),
+            vec!["Dict b", "Dict c", "Dict a"]
+        );
+        // 部分重排：只给两个，未提到的保持相对顺序在后。
+        db.reorder_dictionaries(&["a".into(), "b".into()]).unwrap();
+        let results = db.lookup_entries("cat", None).unwrap();
+        assert_eq!(
+            results.iter().map(|e| e.source.clone()).collect::<Vec<_>>(),
+            vec!["Dict a", "Dict b", "Dict c"]
+        );
     }
 
     #[test]

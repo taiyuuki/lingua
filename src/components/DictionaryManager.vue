@@ -162,7 +162,7 @@ onMounted(() => {
       :show-divider="true"
     >
       <n-list-item
-        v-for="dictionary in dictionaries"
+        v-for="(dictionary, index) in dictionaries"
         :key="dictionary.id"
       >
         <div class="row">
@@ -178,24 +178,48 @@ onMounted(() => {
               {{ dictionary.entryCount }} 个词条
             </n-text>
           </div>
-          <n-popconfirm
-            :show-icon="false"
-            :disabled="deletingId !== null"
-            @positive-click="store.remove(dictionary.id)"
+          <n-space
+            :size="4"
+            align="center"
           >
-            <template #trigger>
-              <n-button
-                size="small"
-                type="error"
-                secondary
-                :loading="deletingId === dictionary.id"
-                :disabled="deletingId !== null && deletingId !== dictionary.id"
-              >
-                删除
-              </n-button>
-            </template>
-            全部词条数据将被移除（大词典需要几秒），确定？
-          </n-popconfirm>
+            <!-- 调序：查询命中顺序（弹窗 chips / 候选）按此排列 -->
+            <n-button
+              size="tiny"
+              quaternary
+              :disabled="index === 0"
+              title="上移（查询时优先命中）"
+              @click="store.move(dictionary.id, -1)"
+            >
+              ↑
+            </n-button>
+            <n-button
+              size="tiny"
+              quaternary
+              :disabled="index === dictionaries.length - 1"
+              title="下移"
+              @click="store.move(dictionary.id, 1)"
+            >
+              ↓
+            </n-button>
+            <n-popconfirm
+              :show-icon="false"
+              :disabled="deletingId !== null"
+              @positive-click="store.remove(dictionary.id)"
+            >
+              <template #trigger>
+                <n-button
+                  size="small"
+                  type="error"
+                  secondary
+                  :loading="deletingId === dictionary.id"
+                  :disabled="deletingId !== null && deletingId !== dictionary.id"
+                >
+                  删除
+                </n-button>
+              </template>
+              全部词条数据将被移除（大词典需要几秒），确定？
+            </n-popconfirm>
+          </n-space>
         </div>
       </n-list-item>
     </n-list>

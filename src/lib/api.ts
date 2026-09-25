@@ -368,6 +368,11 @@ export async function deleteDictionary(id: string): Promise<void> {
   await invoke("delete_dictionary", { id });
 }
 
+/** 词典手动排序：按传入 id 顺序重写排序（查询命中顺序随之变化）。 */
+export async function reorderDictionaries(ids: string[]): Promise<void> {
+  await invoke("reorder_dictionaries", { ids });
+}
+
 /** 词条内链跳词：按词头查词典（entry:// 链接点击用）；未命中返回 null。 */
 export async function dictionaryLookup(
   word: string,

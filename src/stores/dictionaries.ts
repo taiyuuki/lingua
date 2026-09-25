@@ -6,6 +6,7 @@ import {
   importDictionaryMdx,
   importDictionaryTsv,
   listDictionaries,
+  reorderDictionaries,
   onDictionaryImportProgress,
   type DictionaryImportProgress,
   type DictionaryInfoDto,
@@ -181,6 +182,28 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     }
   }
 
+  /** 上移/下移词典：本地交换顺序后整表重写排序，查询命中顺序随之变化。 */
+  async function move(id: string, direction: -1 | 1): Promise<void> {
+    const index = dictionaries.value.findIndex((dict) => dict.id === id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= dictionaries.value.length) {
+      return;
+    }
+    const next = [...dictionaries.value];
+    if (next[index] && next[target]) {
+      const moved = next[index];
+      next[index] = next[target];
+      next[target] = moved;
+    }
+    dictionaries.value = next;
+    try {
+      await reorderDictionaries(next.map((dict) => dict.id));
+    } catch (error) {
+      loadError.value = describeError(error);
+      await load();
+    }
+  }
+
   return {
     dictionaries,
     loaded,
@@ -202,5 +225,6 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     importDictionary,
     cancelImport,
     remove,
+    move,
   };
 });

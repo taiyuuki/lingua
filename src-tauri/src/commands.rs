@@ -1077,6 +1077,18 @@ pub async fn lookup_word_dictionaries(
     .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
+/// 词典手动排序：按传入 id 顺序重写排序（查询命中顺序随之变化）。
+#[tauri::command]
+pub async fn reorder_dictionaries(
+    state: tauri::State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<(), AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.reorder_dictionaries(&ids))
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
 #[tauri::command]
 pub async fn delete_dictionary(
     app: tauri::AppHandle,
