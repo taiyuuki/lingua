@@ -4,8 +4,10 @@
 
 技术栈：**Tauri 2 + Vue 3 + TypeScript + Rust workspace + SQLite**。
 
-> 当前状态：**Phase 5 —— 截图翻译（OCR）已完成**：框选屏幕区域 → OCR →
-> AI 翻译 → Popup。另有划词翻译（词典优先）、多 Provider 路由、生词本。
+> 当前状态：**Phase 9 —— 学习分析已完成**。已具备：划词翻译（词典优先、
+> 流式输出、同语言智能换向）、截图翻译（OCR + Vision 兜底）、多 Provider
+> 任务路由、生词本（SRS-lite 复习 + Anki 导出）、翻译历史、AI 学习分析
+> （词根词缀 / 语法解构）、Prompt 自定义。
 > 在任意应用选中文字 → 全局快捷键 → Popup 显示 AI 翻译。
 > 架构决策与阶段规划见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -20,7 +22,7 @@ lingua/
 │   ├── lingua-translation/  # Translation Engine：词典优先路由 + prompts/ 模板
 │   ├── lingua-dictionary/   # DictionaryProvider trait、SQLite 词典、TSV 导入器
 │   ├── lingua-ocr/          # OcrProvider trait、Tesseract CLI / HTTP sidecar 实现
-│   │                        # （生词本 DAO 在 lingua-database，SRS 数据字段已就位）
+│   │                        # （生词本 / 翻译历史 DAO 在 lingua-database）
 │   ├── lingua-database/     # SQLite：migration runner、settings、providers 表
 │   └── lingua-secrets/      # OS 密钥库（Keychain / Credential Manager / Secret Service）
 ├── src-tauri/               # Tauri 应用壳：commands、全局快捷键、翻译 pipeline、Popup
@@ -51,9 +53,13 @@ lingua/
    自动用它重新识别兜底；Popup 工具栏也可手动「用 Vision 重新识别」。
 5. （可选）在「词典」卡片导入 TSV 词典：翻译单词时优先命中本地词典，
    Popup 显示词性、释义、例句。格式说明见导入表单内的提示。
-6. macOS 首次使用需在「系统设置 → 隐私与安全性 → 辅助功能」授权本应用
+6. 划到的词会进「生词本」（可关）：翻卡复习（SRS-lite 三档评分）、
+   分组筛选、一键「导出 Anki」；Popup 工具栏的「学习分析」按钮可对
+   单词 / 句子生成词根词缀、搭配、语法解构等深度卡片。
+   主窗口「历史」页保留划词与截图翻译记录（自动裁剪到 5000 条）。
+7. macOS 首次使用需在「系统设置 → 隐私与安全性 → 辅助功能」授权本应用
    （Windows 划词与截图无需任何系统授权）。
-7. 关闭主窗口只是隐藏到托盘（划词 / 截图继续可用），退出走托盘菜单；
+8. 关闭主窗口只是隐藏到托盘（划词 / 截图继续可用），退出走托盘菜单；
    开机自启可在设置页或托盘菜单开关。
 
 ## 环境要求
@@ -96,14 +102,14 @@ RUST_LOG=lingua=debug pnpm tauri dev
 
 约束：API Key、用户划词文本、截图内容不写日志（划词只记录字符数）。
 
-## 验收状态（Phase 5）
+## 验收状态（Phase 9）
 
 | 检查项 | 命令 | 状态 |
 |--------|------|------|
 | 前端安装 | `pnpm install` | ✅ |
 | 前端构建 | `pnpm build` | ✅（main + popup 双入口） |
 | Rust 检查 | `cargo check --workspace --all-targets` | ✅ |
-| Rust 测试 | `cargo test --workspace` | ✅ 91 passed |
+| Rust 测试 | `cargo test --workspace` | ✅ 168 passed |
 | Lint | `cargo clippy -D warnings` / `pnpm lint` | ✅ |
 | 应用链接 | `cargo build --workspace` | ✅ |
 | 划词→翻译→Popup 全链路 | `pnpm tauri dev` 手动验证 | ⚠️ 需真机人工验证 |

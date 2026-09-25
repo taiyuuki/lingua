@@ -31,21 +31,21 @@ OS / Network / SQLite / Models
 | `lingua-core` | 领域模型：`AppError`（含 `NoSelection`）、`Language`、`SelectedText`、`TranslationRequest/Result`，IPC 序列化契约（camelCase） | ✅ Phase 0/1 |
 | `lingua-platform` | `SelectionProvider` + `SelectionService`；macOS 实现（AX 选区 + 剪贴板 fallback + 光标/截图：`screencapture` CLI + 屏幕录制权限 FFI）；Windows 实现（UI Automation TextPattern 选区 + 剪贴板 fallback（SendInput Ctrl+C）+ 光标（GetCursorPos + 显示器 DPI 换算）+ GDI 截图）；Linux 明确占位 | ✅ macOS Phase 1/5、Windows |
 | `lingua-ai` | `AIProvider` trait（含 `vision`）、`OpenAiCompatibleProvider`（reqwest/rustls；chat/SSE/多模态 image_url）、`AIRouter`（AiTask → Provider 路由 + 默认回退 + Vision 能力分派）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1/2/6 |
-| `lingua-translation` | Translation Engine：单词 → 词典优先（释义语言须匹配目标语言），未命中/短语/句子 → AI；`prompts/translate/` 模板内嵌；AI JSON 解析失败优雅降级 | ✅ Phase 1/3 |
+| `lingua-translation` | Translation Engine：单词 → 词典优先（释义语言须匹配目标语言），未命中/短语/句子 → AI；`prompts/translate/` 模板内嵌；AI JSON 解析失败优雅降级；同语言换向（`{{same_language_rule}}` 变量注入）；自定义 system prompt 覆盖（`PromptOverride`）；`StudyAnalyzer` 学习分析（`prompts/study/`，解析失败降级 notes） | ✅ Phase 1/3/9 |
 | `lingua-dictionary` | `DictionaryProvider` trait、SQLite 词典实现、TSV 导入器（CC-CEDICT 等公开词典可先转 TSV 再导入） | ✅ Phase 3 |
 | `lingua-ocr` | `OcrProvider` trait、Tesseract CLI 实现、HTTP sidecar 实现（PaddleOCR 契约）、`VisionOcrProvider`（vision 能力 AIProvider 的高级 fallback，输出复用 `OcrResult`） | ✅ Phase 5/6 |
-| `lingua-database` | SQLite（rusqlite bundled）、migration runner、settings KV、providers / dictionaries / vocabulary 表 DAO | ✅ Phase 0/1/3/4 |
+| `lingua-database` | SQLite（rusqlite bundled）、migration runner、settings KV、providers / dictionaries / vocabulary / translation_history 表 DAO | ✅ Phase 0/1/3/4/8 |
 | `lingua-secrets` | `SecretStore` trait + keyring 实现（macOS Keychain / Windows Credential Manager / Linux Secret Service）；API Key 明文只存在这里 | ✅ Phase 1 |
 | `lingua` (src-tauri) | Tauri 壳：commands、全局快捷键、翻译 pipeline（经 Router）、Popup、Provider 管理/连接测试/应用设置命令 | ✅ Phase 1/2 |
 
 后续按阶段新增（不为形式提前建空 crate）：
 
-- **流式输出（SSE）**：Phase 2 未做，随 Phase 3+ 的体验优化一起落地。
-- **Phase 5** `lingua-ocr`（`OcrProvider` trait + PaddleOCR）与 `lingua-screenshot`
-  （截屏选区，平台差异大：macOS ScreenCaptureKit/CGWindowList、Windows GDI/DXGI、
-  Linux X11/Wayland 分治）。
-- **Phase 3/4/8/9** dictionary、vocabulary、history、SRS 视规模决定
-  独立 crate 或并入相邻 crate，边界先行（先有模块边界，再有 crate 拆分）。
+- 已落地：流式输出（SSE，`translate_stream` + `popup://delta` 事件）、
+  `lingua-ocr`（Phase 5/6）、翻译历史（migration 0011 + 主窗口历史页）、
+  学习分析（`AiTask::Study` + `StudyAnalyzer`）、生词本 Anki 导出、
+  Prompt 自定义。
+- **Phase 10**：Wayland 分治（GNOME/KDE）、多屏拼接截图、OCR 原位置
+  覆盖翻译（bbox 数据已保留）。
 
 ### 为什么不现在建全部 crate
 
@@ -130,29 +130,29 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
 
 ## 6. Phase 1 已知限制
 
-1. **未做真机人工验证**：全链路（快捷键 → 划词 → 翻译 → Popup）需要
-   `pnpm tauri dev` 在真机上手动验证；辅助功能权限需用户手动授予。
-2. **剪贴板 fallback 只备份文本**：富文本/图片剪贴板内容在 fallback 后
+1. **剪贴板 fallback 只备份文本**：富文本/图片剪贴板内容在 fallback 后
    只能恢复为文本；且「选区内容恰好等于剪贴板原文」时无法检测变化。
-3. **Popup 定位**：光标所在显示器内居中并做边界钳制，多显示器下
+2. **Popup 定位**：光标所在显示器内居中并做边界钳制，多显示器下
    跟随光标（每次新触发重定位，Loading → Result 原地刷新不跳位）。
    未使用工作区（居中通常不会压任务栏，极端情况可能遮挡）、
    Wayland 下光标坐标受限，均留 Phase 10。
-4. **同语言翻译**：源语言 == 目标语言时仍会照翻（Prompt 已要求在
-   explanation 里说明），智能换向留给 Phase 2 Router。
-5. **非流式输出**：长文本翻译期间 Popup 只有加载态，Phase 2 加 SSE。
-6. **Linux 划词未实现**：注册的是明确的 unsupported 占位
+3. **Linux 划词未实现**：注册的是明确的 unsupported 占位
    Provider，报「平台暂不支持」而不是假装工作。Windows 划词已实现
   （UIA + 剪贴板 fallback），见 §5 平台差异备忘的 UIPI 限制。
+
+（初版的「未真机验证 / 同语言照翻 / 非流式输出」三条已分别由
+真机验证、`translation.swap_language` 同语言换向、`translate_stream`
+流式输出解决。）
 
 ## 7. Phase 2 已知限制
 
 1. 多 Provider 管理已完成：增删改、每条连接测试（发 16 token 探测请求并测延迟）、
    默认 Provider / 翻译任务路由（存 settings 表）、删除时自动清理密钥与路由。
-2. 流式输出（SSE）未做：长文本翻译期间 Popup 只有加载态，随 Phase 3+ 落地。
-3. Prompt 自定义入口未做（内置模板结构已就绪，覆盖逻辑留到词典/学习阶段一起）。
-4. 路由粒度：Translate 与 Vision 两个任务（Phase 6 起）；学习分析
-   （Phase 9）接入时在 `AiTask` 枚举上继续扩展。
+2. 流式输出（SSE）已落地：`translate_stream` 走纯文本流式 prompt，
+   增量经 `popup://delta` 事件 + `latest_streamed` 快照双通道下发。
+3. Prompt 自定义已开放（Phase 9 一并落地，见 §11）。
+4. 路由粒度：Translate / Vision / Study 三个任务；后续新任务在
+   `AiTask` 枚举上继续扩展。
 
 
 ## 8. Phase 3 已知限制
@@ -187,11 +187,14 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
 1. 已完成：migration 0004（`vocabulary` / `vocabulary_reviews`）、
    upsert 语义（自动记录累计 `lookup_count`，手动收藏不计；用户数据
    永不被自动写入覆盖）、筛选（搜索/标签/掌握度）、Popup「★ 收藏」、
-   生词本管理 UI（编辑笔记/标签/掌握度、删除）。复习打点 DAO 就绪。
-2. 复习 UI 与 SRS 算法未做（Phase 9）；`vocabulary_reviews` 只留数据轨迹。
-3. 生词本暂与词典 DAO 同居 `lingua-database`；Phase 9 学习系统引入
-   真正领域逻辑时再评估拆 `lingua-vocabulary` crate。
-4. Anki 导出 / AI 生成学习卡片未做（后续阶段）。
+   生词本管理 UI（编辑笔记/标签/掌握度、删除）。
+2. SRS-lite 复习已落地（生词本 2.0）：到期队列（migration 0009 的
+   `due_at` / `interval_days`）+ 翻卡复习 + 三档评分（忘记/记得/简单）
+   + 间隔阶梯 `[1,2,4,7,15,30,60]` 天重排期。
+3. 生词本暂与词典 DAO 同居 `lingua-database`；Phase 9 学习分析走
+   `lingua-translation::study`，未再拆 vocabulary crate。
+4. Anki 导出已完成（TSV + Anki 原生导入指令头，无需插件）；
+   AI 生成学习卡片由学习分析承担（Popup 学习卡片），.apkg 打包未做。
 
 
 ## 9. Phase 5 已知限制（OCR）
@@ -223,7 +226,8 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
    依赖的 bbox 数据已保留，实现留到后续阶段。
 6. 多显示器：快照与 overlay 均跟随光标所在显示器（截图与选区坐标
    同屏对齐，混合 DPI 也不串屏）；跨多屏拼接成一张大截图未做；
-   `ocr_history` 留到 Phase 8。截图入口默认 `alt+s` 全局快捷键
+   OCR 历史随翻译历史统一记录（Phase 8，`entry_kind = "ocr"`）。
+   截图入口默认 `alt+s` 全局快捷键
    （主窗口按钮入口的光标必然在主窗口所在屏，只能截那一块）。
 
 ## 10. Phase 6：Vision AI（视觉大模型识别）
@@ -250,7 +254,36 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
 
 （定位：Vision LLM 不替代普通 OCR，只做高级 fallback —— 需求原话。）
 
-后续候选（按需排）：Phase 9 学习分析、SRS 复习（Phase 9）、
-ocr_history（Phase 8）。
+## 11. Phase 8/9：翻译历史 · 学习分析 · 导出 · Prompt 自定义
+
+已完成（真机验证待做）：
+
+1. **翻译历史**：migration 0011 `translation_history`（划词 / OCR 共用，
+   `entry_kind` 区分入口）。pipeline 与 OCR 链路在结果态后旁路写入
+   （`record_history_task`，失败只告警不阻断）；写入侧自动裁剪到最近
+   5000 条。主窗口「历史」页：原文/译文搜索、来源筛选、分页、单条
+   删除、一键清空。
+2. **同语言智能换向**：设置 `translation.swap_language`（默认 `en`，
+   可关）。引擎在两条 system prompt 的 `{{same_language_rule}}` 占位符
+   注入换向指令，「文本已是目标语言」由模型阅读时判断（不引入本地
+   语言检测依赖）；换向语言 == 目标语言视为不换向。
+3. **学习分析（Phase 9）**：`AiTask::Study` 路由（路由 → 默认回退），
+   设置页可单独指派 Provider。`lingua-translation::study::StudyAnalyzer`
+   + `prompts/study/`：单词深析（词性 / 义项 / 词根词缀 / 搭配 / 近义
+   辨析 / 记忆点）与句子解构（结构 / 关键短语 / 复述 / 仿写例句），
+   释义语言跟随目标语言。严格 JSON（camelCase 键）解析失败降级
+   `notes` 全文，绝不因格式偏差报错。Popup 工具栏「学习分析」按钮
+   以整面板展示（Esc 先关面板再关弹窗）；带词典词头与已有译文上下文。
+4. **生词本 Anki 导出**：`export_vocabulary_anki` 命令生成带 Anki 导入
+   指令头的 TSV（`#separator:tab` / `#columns` / `#tags column:5`），
+   卡片 = Word / Meaning / Examples / Notes / 标签+语言；字段内
+   tab/换行折叠为空格保证行结构。生词本页保存对话框导出。
+5. **Prompt 自定义**：`TranslationEngine::with_prompt_override` 覆盖
+   system 模板（`prompt.translate_system` / `prompt.translate_stream`，
+   空白 = 内置）。user 模板（含原文位置）不可覆盖；变量照常渲染。
+   设置页「翻译 Prompt（高级）」双 textarea + 变量提示 + 恢复内置。
+
+后续候选（按需排）：Wayland（Phase 10）、多屏拼接截图、OCR 原位置
+覆盖翻译（bbox 数据已保留）、.apkg 打包导出、学习统计报表。
 （图标与文件选择器、Windows 打包 nsis/msi、托盘与开机自启已完成：
 `pnpm tauri build` 产出 `target/release/bundle/` 下两种安装包。）
