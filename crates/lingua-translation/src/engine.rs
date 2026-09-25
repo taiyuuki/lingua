@@ -99,7 +99,7 @@ impl TranslationEngine {
             detected_language: request.source_language.clone(),
             alternatives: Vec::new(),
             explanation: None,
-            dictionary: None,
+            dictionaries: Vec::new(),
         })
     }
 
@@ -141,7 +141,8 @@ impl TranslationEngine {
             .collect();
         let primary = usable.first().cloned()?;
         tracing::debug!(
-            source = %primary.source,
+            dictionaries = usable.len(),
+            primary = %primary.source,
             definitions = primary.definitions.len(),
             "dictionary hit"
         );
@@ -152,9 +153,11 @@ impl TranslationEngine {
             .find(|definition| !definition.definition.trim().is_empty())
             .map(|definition| definition.definition.clone())
             .unwrap_or_else(|| primary.lemma.clone());
-        let alternatives: Vec<String> = usable
+        // 候选释义只取首选词典的其余义项；其它词典的词条整个随
+        // `dictionaries` 下发，由弹窗切换查看。
+        let alternatives: Vec<String> = primary
+            .definitions
             .iter()
-            .flat_map(|entry| entry.definitions.iter())
             .filter(|definition| definition.definition != translated_text)
             .map(|definition| definition.definition.clone())
             .take(6)
@@ -169,7 +172,7 @@ impl TranslationEngine {
                 .or(Some(primary.language.clone())),
             alternatives,
             explanation: None,
-            dictionary: Some(primary),
+            dictionaries: usable,
         })
     }
 
@@ -226,7 +229,7 @@ pub(crate) fn parse_ai_translation(
         detected_language: None,
         alternatives: Vec::new(),
         explanation: None,
-        dictionary: None,
+        dictionaries: Vec::new(),
     };
 
     let Some(json_start) = content.find('{') else {
@@ -280,7 +283,7 @@ pub(crate) fn parse_ai_translation(
         detected_language,
         alternatives,
         explanation,
-        dictionary: None,
+        dictionaries: Vec::new(),
     }
 }
 
@@ -413,8 +416,8 @@ mod tests {
         .await;
         let result = engine.translate(&request("Ephemeral")).await.unwrap();
         assert_eq!(result.translated_text, "短暂的");
-        assert!(result.dictionary.is_some());
-        assert_eq!(result.dictionary.as_ref().unwrap().lemma, "ephemeral");
+        assert!(!result.dictionaries.is_empty());
+        assert_eq!(result.dictionaries[0].lemma, "ephemeral");
         assert_eq!(result.detected_language, Some(Language::En));
     }
 
@@ -423,7 +426,7 @@ mod tests {
         let engine = engine_with_dict("从 AI 来的", vec![dict_entry("other", "别的词")]).await;
         let result = engine.translate(&request("ephemeral")).await.unwrap();
         assert_eq!(result.translated_text, "从 AI 来的");
-        assert!(result.dictionary.is_none());
+        assert!(result.dictionaries.is_empty());
     }
 
     #[tokio::test]
@@ -448,7 +451,46 @@ mod tests {
         .with_dictionary(Some(Arc::new(SqliteDictionaryProvider::new(database))));
         let result = engine.translate(&request("ephemeral")).await.unwrap();
         assert_eq!(result.translated_text, "从 AI 来的");
-        assert!(result.dictionary.is_none());
+        assert!(result.dictionaries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn multiple_dictionaries_are_all_carried() {
+        // 两本词典都命中：dictionaries 按导入顺序携带两条词条，
+        // 首选词典（先导入的）出主结果。
+        let database = lingua_database::Database::open_in_memory().unwrap();
+        database.migrate().unwrap();
+        database
+            .import_dictionary(
+                &DictionaryMeta {
+                    id: "dict-a".into(),
+                    name: "Dict A".into(),
+                    source_language: Language::En,
+                    gloss_language: Language::Zh,
+                },
+                &[dict_entry("ephemeral", "短暂的")],
+            )
+            .unwrap();
+        database
+            .import_dictionary(
+                &DictionaryMeta {
+                    id: "dict-b".into(),
+                    name: "Dict B".into(),
+                    source_language: Language::En,
+                    gloss_language: Language::Zh,
+                },
+                &[dict_entry("ephemeral", "转瞬即逝的")],
+            )
+            .unwrap();
+        let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
+            response: "should-not-be-called".into(),
+        }))
+        .with_dictionary(Some(Arc::new(SqliteDictionaryProvider::new(database))));
+        let result = engine.translate(&request("ephemeral")).await.unwrap();
+        assert_eq!(result.dictionaries.len(), 2);
+        assert_eq!(result.dictionaries[0].source, "Dict A");
+        assert_eq!(result.dictionaries[1].source, "Dict B");
+        assert_eq!(result.translated_text, "短暂的");
     }
 
     #[tokio::test]
@@ -461,7 +503,7 @@ mod tests {
         .await;
         let result = engine.translate(&request("an ephemeral moment")).await.unwrap();
         assert_eq!(result.translated_text, "朝露之瞬");
-        assert_eq!(result.dictionary.as_ref().unwrap().lemma, "an ephemeral moment");
+        assert_eq!(result.dictionaries[0].lemma, "an ephemeral moment");
     }
 
     #[tokio::test]
@@ -483,7 +525,7 @@ mod tests {
         let request = TranslationRequest::new("hello world.", Language::Zh);
         let result = engine.translate(&request).await.unwrap();
         assert_eq!(result.translated_text, "从 AI 来的");
-        assert!(result.dictionary.is_none());
+        assert!(result.dictionaries.is_empty());
     }
 
     #[tokio::test]

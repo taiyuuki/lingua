@@ -105,9 +105,10 @@ pub struct TranslationResult {
     pub detected_language: Option<Language>,
     pub alternatives: Vec<String>,
     pub explanation: Option<String>,
-    /// 命中词典时携带完整词条，Popup 据此渲染词典视图。
+    /// 命中的词典词条（每本词典一条，按导入顺序，首页为首选词典）。
+    /// Popup 据此渲染词典视图并支持多词典切换；AI 结果为空。
     #[serde(default)]
-    pub dictionary: Option<DictionaryEntry>,
+    pub dictionaries: Vec<DictionaryEntry>,
 }
 
 #[cfg(test)]
@@ -147,7 +148,7 @@ mod tests {
             detected_language: Some(Language::En),
             alternatives: vec!["您好".into()],
             explanation: None,
-            dictionary: None,
+            dictionaries: Vec::new(),
         };
         let json = serde_json::to_value(&result).unwrap();
         assert!(json.get("translatedText").is_some());

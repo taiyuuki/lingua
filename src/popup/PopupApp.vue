@@ -85,7 +85,8 @@ async function jumpToEntry(word: string): Promise<void> {
   try {
     const entry = await dictionaryLookup(word);
     if (entry && state.value.status === "result") {
-      state.value.dictionary = entry;
+      state.value.dictionaries = [entry];
+      activeDictionaryIndex.value = 0;
       expandedDefinitions.value = new Set();
     }
   } catch {
@@ -96,8 +97,26 @@ let unlisten: (() => void) | null = null;
 let unlistenTheme: (() => void) | null = null;
 let unlistenDelta: (() => void) | null = null;
 
+/** 多词典：当前展示的词典下标（换词条/跳词时回到首选）。 */
+const activeDictionaryIndex = ref(0);
+const activeEntry = computed(() =>
+  state.value.status === "result"
+    ? (state.value.dictionaries[activeDictionaryIndex.value] ?? null)
+    : null,
+);
+
+function switchDictionary(index: number): void {
+  activeDictionaryIndex.value = index;
+  expandedDefinitions.value = new Set();
+}
+
+// 换词条时回到首选词典（在 activeDictionaryIndex 声明之后注册）。
+watch(state, () => {
+  activeDictionaryIndex.value = 0;
+});
+
 const engineLabel = computed(() =>
-  state.value.status === "result" ? (state.value.dictionary?.source ?? "AI 翻译") : "",
+  state.value.status === "result" ? (activeEntry.value?.source ?? "AI 翻译") : "",
 );
 const detectedLanguageLabel = computed(() =>
   state.value.status === "result" ? state.value.detectedLanguage : null,
@@ -143,8 +162,9 @@ async function toggleSaveToVocabulary(): Promise<void> {
         word: favoriteWord.word,
         language: favoriteWord.language,
         translation: state.value.translatedText,
-        source: state.value.dictionary?.source ?? "manual",
-        examples: state.value.dictionary?.definitions.flatMap((d) => d.examples).slice(0, 4) ?? [],
+        source: activeEntry.value?.source ?? "manual",
+        examples:
+          activeEntry.value?.definitions.flatMap((d) => d.examples).slice(0, 4) ?? [],
       });
       saved.value = true;
     }
@@ -159,7 +179,7 @@ async function evaluateFavorite(): Promise<void> {
     starVisible.value = false;
     return;
   }
-  const word = (state.value.dictionary?.lemma ?? state.value.sourceText).trim();
+  const word = (activeEntry.value?.lemma ?? state.value.sourceText).trim();
   const language = state.value.detectedLanguage;
   try {
     starVisible.value = await isWord(word);
@@ -499,20 +519,37 @@ function onToolbarMouseDown(event: MouseEvent): void {
         <!-- 译文行：词典命中时词条卡片即全部内容（译文行本就是首条
              释义的纯文本，与卡片重复）；AI 结果才单独显示译文。 -->
         <p
-          v-if="!state.dictionary"
+          v-if="state.dictionaries.length === 0"
           class="popup-translation"
         >
           {{ state.translatedText }}
         </p>
 
-        <!-- 词典视图：词条释义/例句 -->
+        <!-- 词典视图：多词典切换 + 词条释义/例句 -->
         <div
-          v-if="state.dictionary"
+          v-if="activeEntry"
           class="popup-dictionary"
         >
+          <div
+            v-if="state.dictionaries.length > 1"
+            class="popup-dict-switcher"
+          >
+            <button
+              v-for="(entry, index) in state.dictionaries"
+              :key="entry.source"
+              type="button"
+              :class="['popup-dict-tab', {
+                'popup-dict-tab-active': index === activeDictionaryIndex,
+              }]"
+              :title="entry.lemma"
+              @click="switchDictionary(index)"
+            >
+              {{ entry.source }}
+            </button>
+          </div>
           <ol class="popup-dict-definitions">
             <li
-              v-for="(definition, index) in state.dictionary.definitions.slice(0, 8)"
+              v-for="(definition, index) in activeEntry.definitions.slice(0, 8)"
               :key="index"
             >
               <!-- 富文本（导入期已净化）与纯文本两套渲染，折叠交互共用。

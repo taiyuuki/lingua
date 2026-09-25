@@ -32,7 +32,8 @@ export interface TranslationResult {
   detectedLanguage: string | null;
   alternatives: string[];
   explanation: string | null;
-  dictionary: DictionaryEntryDto | null;
+  /** 命中的词典词条（每本词典一条，按导入顺序，首页首选）；AI 结果为空。 */
+  dictionaries: DictionaryEntryDto[];
 }
 
 /**

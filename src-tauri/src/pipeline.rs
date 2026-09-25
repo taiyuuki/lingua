@@ -95,6 +95,7 @@ async fn run(app: &AppHandle) -> AppResult<()> {
 
     // 4. 单词查询自动记入生词本（短语/句子不记）；
     //    在 result 移入 popup 前先取出需要的数据，写库放在 popup 展示之后。
+    //    来源/例句取首选词典（dictionaries[0]）。
     let vocabulary_record = if classify_text(&request.text) == TextKind::Word {
         Some(VocabularyUpsert {
             word: request.text.clone(),
@@ -104,13 +105,13 @@ async fn run(app: &AppHandle) -> AppResult<()> {
                 .or_else(|| request.source_language.clone())
                 .unwrap_or_else(|| Language::parse("und")),
             translation: Some(result.translated_text.clone()),
-            source: result
-                .dictionary
-                .as_ref()
-                .map_or_else(|| "ai".to_string(), |entry| entry.source.clone()),
+            source: result.dictionaries.first().map_or_else(
+                || "ai".to_string(),
+                |entry| entry.source.clone(),
+            ),
             examples: result
-                .dictionary
-                .as_ref()
+                .dictionaries
+                .first()
                 .map(|entry| {
                     entry
                         .definitions

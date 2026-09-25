@@ -651,6 +651,34 @@ body {
   min-height: 0;
 }
 
+/* 多词典切换：词典名称 chips */
+.popup-dict-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.popup-dict-tab {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.popup-dict-tab:hover {
+  color: var(--color-text);
+}
+
+.popup-dict-tab-active {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
 /* 词典视图 */
 .popup-dictionary {
   display: flex;
