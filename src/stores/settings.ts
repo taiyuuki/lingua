@@ -24,6 +24,26 @@ export const SUPPORTED_TARGET_LANGUAGES: Array<{ code: string; label: string }> 
   { code: "ru", label: "Русский" },
 ];
 
+/** 词典语言目录：导入词典的词头/释义语言与生词语言标注用，比目标语言更全。
+ *  后端对任意语言代码都放行，此处只决定下拉选项与显示名。 */
+export const SUPPORTED_LANGUAGES: Array<{ code: string; label: string }> = [
+  ...SUPPORTED_TARGET_LANGUAGES,
+  { code: "it", label: "Italiano" },
+  { code: "pt", label: "Português" },
+  { code: "nl", label: "Nederlands" },
+  { code: "pl", label: "Polski" },
+  { code: "sv", label: "Svenska" },
+  { code: "el", label: "Ελληνικά" },
+  { code: "tr", label: "Türkçe" },
+  { code: "ar", label: "العربية" },
+  { code: "he", label: "עברית" },
+  { code: "hi", label: "हिन्दी" },
+  { code: "th", label: "ไทย" },
+  { code: "vi", label: "Tiếng Việt" },
+  { code: "id", label: "Bahasa Indonesia" },
+  { code: "la", label: "Latina" },
+];
+
 export const useSettingsStore = defineStore("settings", () => {
   const loaded = ref(false);
   const loadError = ref<string | null>(null);

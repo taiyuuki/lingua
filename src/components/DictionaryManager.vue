@@ -25,7 +25,7 @@ import {
   isMdxPath,
   useDictionariesStore,
 } from "../stores/dictionaries";
-import { SUPPORTED_TARGET_LANGUAGES } from "../stores/settings";
+import { SUPPORTED_LANGUAGES } from "../stores/settings";
 import { pickDictionaryFilePath } from "../lib/api";
 
 const store = useDictionariesStore();
@@ -47,7 +47,7 @@ const {
 const importName = computed(() => form.value.name || form.value.path || "词典");
 
 const languageSelectOptions = computed(() =>
-  SUPPORTED_TARGET_LANGUAGES.map((lang) => ({
+  SUPPORTED_LANGUAGES.map((lang) => ({
     label: `${lang.label}（${lang.code}）`,
     value: lang.code,
   })),

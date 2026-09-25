@@ -24,7 +24,7 @@ import {
   VOCABULARY_PAGE_SIZE,
   useVocabularyStore,
 } from "../stores/vocabulary";
-import { SUPPORTED_TARGET_LANGUAGES } from "../stores/settings";
+import { SUPPORTED_LANGUAGES } from "../stores/settings";
 import { lookupEntriesForWord } from "../lib/dictRender";
 import type {
   DictionaryEntryDto,
@@ -51,9 +51,9 @@ const {
   reviewStats,
 } = storeToRefs(store);
 
-/** 语言代码 → 中文名（复用目标语言表；und = 早期自动记录未识别）。 */
+/** 语言代码 → 显示名（复用语言目录；und = 早期自动记录未识别）。 */
 const languageLabel = (code: string): string =>
-  code === "und" ? "未识别" : (SUPPORTED_TARGET_LANGUAGES.find((lang) => lang.code === code)?.label ?? code);
+  code === "und" ? "未识别" : (SUPPORTED_LANGUAGES.find((lang) => lang.code === code)?.label ?? code);
 
 function toggleLanguageFilter(code: string): void {
   filter.value.language = filter.value.language === code ? "" : code;
