@@ -77,6 +77,18 @@ function onRichLinkClick(event: MouseEvent): void {
   }
 }
 
+// Windows 的 WebView2 不支持自定义 scheme 的子资源加载（wry 仅在
+// 导航时做 scheme 转换），渲染前把资源 URL 转成 http://mdx-res.localhost
+// 形态（与 tauri asset 协议的 convertFileSrc 同一约定）。
+// 库里存平台无关的 mdx-res:// 形态，换平台无需重导。
+const MDX_RES_ORIGIN = navigator.userAgent.includes("Windows")
+  ? "http://mdx-res.localhost/"
+  : "mdx-res://localhost/";
+
+function renderRichHtml(html: string): string {
+  return html.replaceAll("mdx-res://localhost/", MDX_RES_ORIGIN);
+}
+
 /** 内链跳词：命中则局部替换当前词条，未命中/失败静默保留。 */
 async function jumpToEntry(word: string): Promise<void> {
   if (!word || state.value.status !== "result") {
@@ -559,7 +571,7 @@ function onToolbarMouseDown(event: MouseEvent): void {
                 v-if="definition.html"
                 class="popup-dict-rich"
                 @click="onRichLinkClick($event)"
-                v-html="definition.html"
+                v-html="renderRichHtml(definition.html)"
               />
               <!-- eslint-enable vue/no-v-html -->
               <div
