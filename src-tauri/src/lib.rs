@@ -108,6 +108,7 @@ pub struct TrayState {
             commands::list_dictionaries,
             commands::import_dictionary_tsv,
             commands::import_dictionary_mdx,
+            commands::cancel_dictionary_import,
             commands::dictionary_lookup,
             commands::lookup_word_dictionaries,
             commands::delete_dictionary,

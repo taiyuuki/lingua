@@ -1,6 +1,7 @@
 import { computed, reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import {
+  cancelDictionaryImport,
   deleteDictionary,
   importDictionaryMdx,
   importDictionaryTsv,
@@ -56,12 +57,18 @@ export function fileNameStem(path: string): string {
 export const useDictionariesStore = defineStore("dictionaries", () => {
   const dictionaries = ref<DictionaryInfoDto[]>([]);
   const loaded = ref(false);
+  /** 列表首载中（首屏动画用）。 */
+  const loading = ref(false);
   const loadError = ref<string | null>(null);
   const importError = ref<string | null>(null);
   const importMessage = ref<string | null>(null);
   /** MDX 引用了资源但没有配对 .mdd 的导入警告（与错误分开显示）。 */
   const importWarning = ref<string | null>(null);
   const importing = ref(false);
+  /** 取消请求已发出（等待后端批边界停止并清理）。 */
+  const cancelling = ref(false);
+  /** 正在删除的词典 id（行级 loading）。 */
+  const deletingId = ref<string | null>(null);
   /** MDX 导入进度（TSV 导入恒为 null）。 */
   const importProgress = ref<DictionaryImportProgress | null>(null);
   const form = reactive<ImportForm>(emptyForm());
@@ -69,12 +76,17 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
   const hasDictionaries = computed(() => dictionaries.value.length > 0);
 
   async function load(): Promise<void> {
+    if (!loaded.value) {
+      loading.value = true;
+    }
     loadError.value = null;
     try {
       dictionaries.value = await listDictionaries();
       loaded.value = true;
     } catch (error) {
       loadError.value = describeError(error);
+    } finally {
+      loading.value = false;
     }
   }
 
@@ -124,12 +136,16 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
       const result = isMdxPath(form.path)
         ? await importDictionaryMdx(request)
         : await importDictionaryTsv(request);
-      importMessage.value = `导入成功：${result.importedEntries} 个词条` +
-        (result.skippedLines > 0 ? `，跳过 ${result.skippedLines} 条` : "");
-      if (result.resourcesMissing) {
-        importWarning.value =
-          "该词典缺少配对的 .mdd 资源文件，释义中的图片无法显示。" +
-          "把 .mdd 放到 .mdx 同一目录后，删除并重新导入即可。";
+      if (result.cancelled) {
+        importMessage.value = "已取消导入，本次的词条与资源已清理。";
+      } else {
+        importMessage.value = `导入成功：${result.importedEntries} 个词条` +
+          (result.skippedLines > 0 ? `，跳过 ${result.skippedLines} 条` : "");
+        if (result.resourcesMissing) {
+          importWarning.value =
+            "该词典缺少配对的 .mdd 资源文件，释义中的图片无法显示。" +
+            "把 .mdd 放到 .mdx 同一目录后，删除并重新导入即可。";
+        }
       }
       await load();
     } catch (error) {
@@ -138,27 +154,44 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
       unsubscribe();
       importProgress.value = null;
       importing.value = false;
+      cancelling.value = false;
+    }
+  }
+
+  /** 取消导入：后端在批边界停止并清理半成品，本次 import 调用随即返回。 */
+  async function cancelImport(): Promise<void> {
+    cancelling.value = true;
+    try {
+      await cancelDictionaryImport();
+    } catch {
+      cancelling.value = false;
     }
   }
 
   async function remove(id: string): Promise<void> {
     // 确认交互在组件层（两段点击）；WKWebView 不支持 window.confirm。
+    deletingId.value = id;
     try {
       await deleteDictionary(id);
       await load();
     } catch (error) {
       loadError.value = describeError(error);
+    } finally {
+      deletingId.value = null;
     }
   }
 
   return {
     dictionaries,
     loaded,
+    loading,
     loadError,
     importError,
     importMessage,
     importWarning,
     importing,
+    cancelling,
+    deletingId,
     importProgress,
     form,
     hasDictionaries,
@@ -167,6 +200,7 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     closeForm,
     setPickedPath,
     importDictionary,
+    cancelImport,
     remove,
   };
 });

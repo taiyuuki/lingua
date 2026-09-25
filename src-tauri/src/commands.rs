@@ -612,6 +612,21 @@ pub struct ImportDictionaryResult {
     /// MDX 释义引用了 CSS/图片资源，但同目录没有配对的 .mdd
     /// （或解包失败）——释义将以基础排版显示。
     pub resources_missing: bool,
+    /// 用户中途取消：本次导入的半成品（词条 + 资源）已清理。
+    #[serde(default)]
+    pub cancelled: bool,
+}
+
+/// 导入取消标志：`cancel_dictionary_import` 置位，导入循环在批边界
+/// 检查并停止（5000 条一批，粒度在秒级内）。
+static IMPORT_CANCELLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 取消正在进行的词典导入。
+#[tauri::command]
+pub async fn cancel_dictionary_import() -> Result<(), AppError> {
+    IMPORT_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 }
 
 /// 从 TSV 文件导入词典（格式见 `lingua_dictionary::tsv` 模块文档）。
@@ -656,6 +671,7 @@ pub async fn import_dictionary_tsv(
             imported_entries,
             skipped_lines: parsed.skipped_lines,
             resources_missing: false,
+            cancelled: false,
         })
     })
     .await
@@ -840,6 +856,8 @@ pub async fn import_dictionary_mdx(
         };
 
         emit_progress("parsing", 0, 0);
+        // 清掉可能残留的上一次取消信号。
+        IMPORT_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
         let dict =
             lingua_dictionary::mdx::MdxFile::open(std::path::Path::new(&request.path))?;
         let total = dict.entry_count();
@@ -942,6 +960,9 @@ pub async fn import_dictionary_mdx(
                 if !mdd_extracted && !resources_missing {
                     resources_missing = references_resources(&batch);
                 }
+                if IMPORT_CANCELLED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                    return cancel_import(&database, &app, &meta, resource_dir.as_deref(), imported, skipped, resources_missing);
+                }
                 imported += database.import_dictionary(&meta, &batch)?;
                 emit_progress("importing", imported, total);
                 raw_batch.clear();
@@ -972,10 +993,43 @@ pub async fn import_dictionary_mdx(
             imported_entries: imported,
             skipped_lines: skipped,
             resources_missing,
+            cancelled: false,
         })
     })
     .await
     .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 取消导入：清理半成品（词典词条 + 资源目录），返回取消结果。
+fn cancel_import(
+    database: &lingua_database::Database,
+    app: &tauri::AppHandle,
+    meta: &DictionaryMeta,
+    resource_dir: Option<&std::path::Path>,
+    imported: usize,
+    skipped: usize,
+    resources_missing: bool,
+) -> Result<ImportDictionaryResult, AppError> {
+    database.delete_dictionary(&meta.id)?;
+    if let Some(dir) = resource_dir {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    tracing::info!(dictionary = %meta.id, imported, "mdx import cancelled; partial data cleaned");
+    let _ = app.emit(
+        "dictionary://import-progress",
+        DictionaryImportProgress {
+            dictionary_id: meta.id.clone(),
+            phase: "importing",
+            imported,
+            total: imported,
+        },
+    );
+    Ok(ImportDictionaryResult {
+        imported_entries: 0,
+        skipped_lines: skipped,
+        resources_missing,
+        cancelled: true,
+    })
 }
 
 /// 词条内链跳词（`entry://` 链接点击）：按词头查词典。

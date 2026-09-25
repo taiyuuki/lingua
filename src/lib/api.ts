@@ -126,6 +126,8 @@ export interface ImportDictionaryResultDto {
   skippedLines: number;
   /** MDX 释义引用了 CSS/图片资源但同目录没有配对 .mdd。 */
   resourcesMissing: boolean;
+  /** 用户中途取消：半成品已清理。 */
+  cancelled: boolean;
 }
 
 export type Mastery = "new" | "learning" | "mastered";
@@ -337,6 +339,11 @@ export async function importDictionaryMdx(
   request: ImportDictionaryRequestDto,
 ): Promise<ImportDictionaryResultDto> {
   return invoke<ImportDictionaryResultDto>("import_dictionary_mdx", { request });
+}
+
+/** 取消正在进行的词典导入（后端在批边界停止并清理半成品）。 */
+export async function cancelDictionaryImport(): Promise<void> {
+  await invoke("cancel_dictionary_import");
 }
 
 /** MDX 导入进度事件 payload（大词库分批写库时上报）。 */

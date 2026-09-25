@@ -16,6 +16,7 @@ import {
   NProgress,
   NSelect,
   NSpace,
+  NSpin,
   NText,
 } from "naive-ui";
 import {
@@ -30,14 +31,20 @@ import { pickDictionaryFilePath } from "../lib/api";
 const store = useDictionariesStore();
 const {
   dictionaries,
+  loading,
   loadError,
   importError,
   importMessage,
   importWarning,
   importing,
+  cancelling,
   importProgress,
+  deletingId,
   form,
 } = storeToRefs(store);
+
+/** 导入中横条显示的词典名。 */
+const importName = computed(() => form.value.name || form.value.path || "词典");
 
 const languageSelectOptions = computed(() =>
   SUPPORTED_TARGET_LANGUAGES.map((lang) => ({
@@ -92,6 +99,7 @@ onMounted(() => {
     </template>
 
     <n-text
+      v-if="!loading"
       depth="3"
       style="display: block; margin-bottom: 12px"
     >
@@ -107,9 +115,50 @@ onMounted(() => {
       {{ loadError }}
     </n-alert>
 
+    <!-- 首次加载动画 -->
+    <div
+      v-if="loading"
+      class="dict-loading"
+    >
+      <n-spin size="small" />
+      <n-text depth="3">
+        正在加载词典列表…
+      </n-text>
+    </div>
+
+    <!-- 后台导入中横条（从导入表单返回列表后仍可见） -->
+    <n-alert
+      v-if="importing && !form.open"
+      type="info"
+      :show-icon="false"
+      style="margin-bottom: 12px"
+    >
+      <div class="import-banner">
+        <span>
+          正在导入「{{ importName }}」
+          <template v-if="importProgress">
+            {{
+              importProgress.phase === "parsing"
+                ? "（解析索引…）"
+                : `（${importProgress.imported} / ${importProgress.total} 词条）`
+            }}
+          </template>
+        </span>
+        <n-button
+          size="tiny"
+          type="error"
+          secondary
+          :loading="cancelling"
+          @click="store.cancelImport()"
+        >
+          取消导入
+        </n-button>
+      </div>
+    </n-alert>
+
     <!-- 词典列表 -->
     <n-list
-      v-if="dictionaries.length > 0 && !form.open"
+      v-if="dictionaries.length > 0 && !form.open && !loading"
       :show-divider="true"
     >
       <n-list-item
@@ -131,6 +180,7 @@ onMounted(() => {
           </div>
           <n-popconfirm
             :show-icon="false"
+            :disabled="deletingId !== null"
             @positive-click="store.remove(dictionary.id)"
           >
             <template #trigger>
@@ -138,17 +188,19 @@ onMounted(() => {
                 size="small"
                 type="error"
                 secondary
+                :loading="deletingId === dictionary.id"
+                :disabled="deletingId !== null && deletingId !== dictionary.id"
               >
                 删除
               </n-button>
             </template>
-            全部词条数据将被移除，确定？
+            全部词条数据将被移除（大词典需要几秒），确定？
           </n-popconfirm>
         </div>
       </n-list-item>
     </n-list>
     <n-empty
-      v-else-if="!form.open"
+      v-else-if="!form.open && !loading"
       description="还没有词典。支持导入 TSV / MDX 词典文件（如 CC-CEDICT、ECDICT）。"
       style="margin: 12px 0"
     />
@@ -227,17 +279,28 @@ onMounted(() => {
 
         <n-space align="center">
           <n-button
+            v-if="!importing"
             type="primary"
-            :loading="importing"
             @click="store.importDictionary()"
           >
-            {{ importing ? "导入中…" : "开始导入" }}
+            开始导入
           </n-button>
+          <!-- 真取消：后端停止导入并清理半成品 -->
+          <n-button
+            v-if="importing"
+            type="error"
+            secondary
+            :loading="cancelling"
+            @click="store.cancelImport()"
+          >
+            取消导入
+          </n-button>
+          <!-- 返回列表；导入中返回则导入转后台继续（列表页有进度条与取消入口） -->
           <n-button
             secondary
             @click="store.closeForm()"
           >
-            取消
+            {{ importing ? "后台继续，返回列表" : "返回" }}
           </n-button>
           <n-text
             v-if="importMessage"
@@ -286,5 +349,20 @@ onMounted(() => {
   font-size: 12px;
   white-space: pre-line;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.dict-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 0;
+}
+
+.import-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 </style>
