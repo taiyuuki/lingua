@@ -65,26 +65,27 @@ impl TranslationEngine {
     /// 「同语言规则」prompt 片段：替换两条 system 模板里的
     /// `{{same_language_rule}}` 占位符（JSON 路径与流式路径措辞不同）。
     fn same_language_rule(&self, request: &TranslationRequest, streaming: bool) -> String {
-        let swap_active = self
+        // 与目标语言相同的换向语言视为未配置。
+        let swap = self
             .swap_language
             .as_ref()
-            .is_some_and(|swap| *swap != request.target_language);
-        match (streaming, swap_active) {
-            (false, true) => format!(
+            .filter(|swap| **swap != request.target_language);
+        match (streaming, swap) {
+            (false, Some(swap)) => format!(
                 "If the source text is already (almost entirely) in the target language, \
                  DO NOT restate it: translate it into `{}` instead and say in \
                  \"explanation\" that you swapped the direction.",
-                self.swap_language.as_ref().expect("checked above").code()
+                swap.code()
             ),
-            (false, false) => "If the source text is already in the target language, \
+            (false, None) => "If the source text is already in the target language, \
                  still translate it faithfully and say so in \"explanation\"."
                 .to_string(),
-            (true, true) => format!(
+            (true, Some(swap)) => format!(
                 "If the source text is already (almost entirely) in the target language, \
                  DO NOT restate it: translate it into `{}` instead and output only that.",
-                self.swap_language.as_ref().expect("checked above").code()
+                swap.code()
             ),
-            (true, false) => "If the source text is already in the target language, \
+            (true, None) => "If the source text is already in the target language, \
                  output it unchanged."
                 .to_string(),
         }
