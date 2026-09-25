@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  analyzeStudy,
   getAppSettings,
   hidePopup,
   isWord,
@@ -20,10 +21,12 @@ import {
   type DictionaryEntryDto,
   type OcrSourceInfo,
   type PopupState,
+  type StudyAnalysis,
 } from "../lib/api";
 import { applyTheme, normalizeTheme } from "../lib/theme";
 import { lookupEntriesForWord } from "../lib/dictRender";
 import DictionaryEntryPanel from "../components/DictionaryEntryPanel.vue";
+import StudyPanel from "../components/StudyPanel.vue";
 
 // 快照同款「事件 + 快照」双通道；窗口复用，靠通知保持最新状态。
 // 布局参考 Bob：顶部工具栏（置顶/收藏/复制原文）→ 原文区 → 译文卡片。
@@ -44,6 +47,46 @@ const visionRetryAvailable = ref(false);
 const ocrSource = ref<OcrSourceInfo | null>(null);
 // 当前展示的词典词条（由共享面板经 active-change 上报）。
 const activeEntry = ref<DictionaryEntryDto | null>(null);
+// 学习分析（Phase 9）：打开时以整面板替换内容区；Esc 先关面板再关弹窗。
+const study = reactive({
+  visible: false,
+  loading: false,
+  error: "",
+  data: null as StudyAnalysis | null,
+});
+
+/** 发起学习分析：单词用词典词头，其余用原文；带检测结果与译文。 */
+async function runStudy(): Promise<void> {
+  if (state.value.status !== "result" || study.loading) {
+    return;
+  }
+  const text = (activeEntry.value?.lemma ?? state.value.sourceText).trim();
+  if (!text) {
+    return;
+  }
+  study.visible = true;
+  study.loading = true;
+  study.error = "";
+  study.data = null;
+  try {
+    study.data = await analyzeStudy({
+      text,
+      language: state.value.detectedLanguage,
+      translation: state.value.translatedText,
+    });
+  } catch (error) {
+    study.error = String(error);
+  } finally {
+    study.loading = false;
+  }
+}
+
+function closeStudy(): void {
+  study.visible = false;
+  study.loading = false;
+  study.error = "";
+  study.data = null;
+}
 
 function onActiveEntryChange(entry: DictionaryEntryDto | null): void {
   activeEntry.value = entry;
@@ -195,7 +238,12 @@ async function retryWithVision(): Promise<void> {
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
-    void hidePopup();
+    // 学习面板打开时 Esc 只关面板，再按一次才关弹窗。
+    if (study.visible) {
+      closeStudy();
+    } else {
+      void hidePopup();
+    }
   }
 }
 
@@ -221,6 +269,7 @@ onMounted(async () => {
     streamed.text = "";
     copiedSource.value = false;
     copiedTranslation.value = false;
+    closeStudy();
     void evaluateFavorite();
     void refreshVisionRetry();
     void refreshOcrSource();
@@ -294,6 +343,25 @@ function onToolbarMouseDown(event: MouseEvent): void {
 
       <template v-if="state.status === 'result'">
         <button
+          class="tool-btn"
+          type="button"
+          title="AI 学习分析：词根词缀 / 例句搭配 / 语法解构"
+          @click="runStudy"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 3l9 4.5-9 4.5-9-4.5z" />
+            <path d="M5.5 10v4.6c0 1.5 2.9 3.4 6.5 3.4s6.5-1.9 6.5-3.4V10" />
+            <path d="M21 7.5V13" />
+          </svg>
+        </button>
+        <button
           v-if="visionRetryAvailable"
           class="tool-btn"
           type="button"
@@ -361,9 +429,22 @@ function onToolbarMouseDown(event: MouseEvent): void {
       </template>
     </div>
 
+    <!-- 学习分析面板：打开时整面板替换内容区（Esc 先关面板） -->
+    <div
+      v-if="study.visible"
+      class="popup-scroll"
+    >
+      <StudyPanel
+        :analysis="study.data"
+        :loading="study.loading"
+        :error="study.error"
+        @close="closeStudy"
+      />
+    </div>
+
     <!-- 加载中：原文先行，流式译文增量填充 -->
     <div
-      v-if="state.status === 'loading'"
+      v-else-if="state.status === 'loading'"
       class="popup-scroll"
     >
       <template v-if="state.sourceText">

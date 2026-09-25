@@ -65,6 +65,8 @@ export interface AppSettingsDto {
   defaultProviderId: string | null;
   translateProviderId: string | null;
   visionProviderId: string | null;
+  /** 学习分析任务路由（null = 跟随默认 Provider）。 */
+  studyProviderId: string | null;
   targetLanguage: string;
   /** 同语言换向目标（划到的文本已是目标语言时改译成该语言；"" = 关闭）。 */
   swapLanguage: string;
@@ -171,6 +173,53 @@ export interface SaveVocabularyRequestDto {
 
 /** 历史条目来源：划词 / 截图 OCR。 */
 export type HistoryKind = "selection" | "ocr";
+
+/** 与 Rust `StudyAnalysis` 对应（camelCase）。学习卡片各块可选。 */
+export interface StudyExampleDto {
+  text: string;
+  translation: string | null;
+}
+
+export interface StudySenseDto {
+  pos: string | null;
+  meaning: string;
+  example: string | null;
+  exampleTranslation: string | null;
+}
+
+export interface StudyMorphologyDto {
+  root: string | null;
+  affixes: string | null;
+  cognates: string | null;
+}
+
+export interface StudySynonymDto {
+  word: string;
+  nuance: string | null;
+}
+
+export interface StudyKeyPhraseDto {
+  phrase: string;
+  meaning: string | null;
+}
+
+export interface StudyAnalysis {
+  kind: string | null;
+  language: string | null;
+  phonetic: string | null;
+  partsOfSpeech: string[];
+  senses: StudySenseDto[];
+  morphology: StudyMorphologyDto | null;
+  collocations: string[];
+  synonyms: StudySynonymDto[];
+  structure: string | null;
+  keyPhrases: StudyKeyPhraseDto[];
+  paraphrase: string | null;
+  examples: StudyExampleDto[];
+  mnemonics: string | null;
+  /** 降级时携带模型原始输出。 */
+  notes: string | null;
+}
 
 /** 与 Rust `HistoryItem` 对应（camelCase）。 */
 export interface HistoryItemDto {
@@ -516,6 +565,15 @@ export async function deleteHistory(id: number): Promise<boolean> {
 /** 清空全部历史，返回删除条数。 */
 export async function clearHistory(): Promise<number> {
   return invoke<number>("clear_history");
+}
+
+/** 学习分析（Phase 9）：单词深析 / 句子解构，走 Study 任务路由。 */
+export async function analyzeStudy(request: {
+  text: string;
+  language: string | null;
+  translation: string | null;
+}): Promise<StudyAnalysis> {
+  return invoke<StudyAnalysis>("analyze_study", { request });
 }
 
 export async function openPopup(): Promise<void> {

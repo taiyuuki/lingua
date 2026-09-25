@@ -21,6 +21,8 @@ pub enum AiTask {
     Translate,
     /// 视觉识别（截图 OCR 的高级 fallback，只派给 vision 能力 Provider）。
     Vision,
+    /// 学习分析（Phase 9：单词深析 / 句子解构，输出结构化学习卡片）。
+    Study,
 }
 
 /// Provider 注册表 + 路由表。
@@ -39,7 +41,8 @@ impl AIRouter {
     /// 解析某个任务应使用的 Provider：任务路由 → 默认 Provider。
     pub fn provider_for(&self, task: AiTask) -> AppResult<Arc<dyn AIProvider>> {
         match task {
-            AiTask::Translate => self.provider_by_route(task),
+            // Translate / Study 都是普通文本任务：路由 → 默认。
+            AiTask::Translate | AiTask::Study => self.provider_by_route(task),
             // Vision 按能力分派：路由/默认指向的 Provider 不具备
             // vision 能力时自动改派（见 vision_provider）。
             AiTask::Vision => self.vision_provider(),

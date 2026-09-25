@@ -22,6 +22,7 @@ const {
   defaultProviderId,
   translateProviderId,
   visionProviderId,
+  studyProviderId,
   targetLanguage,
   swapLanguage,
   shortcut,
@@ -198,6 +199,16 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
           <n-select
             v-model:value="visionProviderId"
             :options="[{ label: '自动', value: '' }, ...visionProviderOptions]"
+            clearable
+          />
+        </n-form-item>
+        <n-form-item
+          label="学习分析"
+          class="span-2"
+        >
+          <n-select
+            v-model:value="studyProviderId"
+            :options="[{ label: '跟随默认', value: '' }, ...providerOptions]"
             clearable
           />
         </n-form-item>

@@ -23,6 +23,8 @@ use tauri::{AppHandle, Emitter, Manager};
 pub const SETTINGS_DEFAULT_PROVIDER: &str = "ai.default_provider_id";
 pub const SETTINGS_ROUTE_TRANSLATE: &str = "router.task.translate";
 pub const SETTINGS_ROUTE_VISION: &str = "router.task.vision";
+/// 学习分析任务路由（Phase 9；未设置 = 跟随默认 Provider）。
+pub const SETTINGS_ROUTE_STUDY: &str = "router.task.study";
 pub const SETTINGS_TARGET_LANGUAGE: &str = "translation.target_language";
 /// 同语言换向目标（划到的文本已是目标语言时改译成该语言；
 /// 空串 = 关闭）。默认 en：目标 zh 的用户划到中文文本改译英文。
@@ -222,6 +224,15 @@ pub fn build_router(database: &Database) -> AppResult<AIRouter> {
             builder = builder.route(AiTask::Vision, vision_id);
         } else {
             tracing::warn!(provider = %vision_id, "vision route points to a missing provider; ignoring");
+        }
+    }
+
+    // 学习分析路由：普通文本任务，跟随默认 Provider 即可工作。
+    if let Some(study_id) = read_route_provider(database, SETTINGS_ROUTE_STUDY) {
+        if registered.contains(&study_id) {
+            builder = builder.route(AiTask::Study, study_id);
+        } else {
+            tracing::warn!(provider = %study_id, "study route points to a missing provider; ignoring");
         }
     }
 

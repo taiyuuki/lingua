@@ -140,6 +140,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::ocr_retry_available,
             commands::retry_ocr_with_vision,
             commands::ocr_source_info,
+            commands::analyze_study,
             commands::autostart_enabled,
             commands::set_autostart,
         ])

@@ -5,7 +5,9 @@
 //! AI 路由可用，但路由边界、请求契约与 Prompt 模板先按最终形态建立。
 
 pub mod engine;
+pub mod study;
 pub mod template;
 
 pub use engine::TranslationEngine;
+pub use study::{StudyAnalysis, StudyAnalyzer, StudyRequest};
 pub use template::PromptTemplate;

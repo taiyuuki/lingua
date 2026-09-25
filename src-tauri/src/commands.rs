@@ -330,6 +330,8 @@ pub struct AppSettingsDto {
     pub translate_provider_id: Option<String>,
     /// Vision 任务路由（`None` = 自动挑选任一 vision 能力 Provider）。
     pub vision_provider_id: Option<String>,
+    /// 学习分析任务路由（`None` = 跟随默认 Provider）。
+    pub study_provider_id: Option<String>,
     /// 划词翻译的目标语言（BCP-47 基础码）。
     pub target_language: Language,
     /// 同语言换向目标（BCP-47 基础码；空串 = 关闭）。
@@ -364,6 +366,10 @@ pub async fn get_app_settings(
             vision_provider_id: pipeline::read_route_provider(
                 &database,
                 pipeline::SETTINGS_ROUTE_VISION,
+            ),
+            study_provider_id: pipeline::read_route_provider(
+                &database,
+                pipeline::SETTINGS_ROUTE_STUDY,
             ),
             target_language: Language::parse(&pipeline::read_target_language_code(&database)),
             swap_language: pipeline::read_setting(&database, pipeline::SETTINGS_SWAP_LANGUAGE)
@@ -420,6 +426,14 @@ pub async fn save_app_settings(
             }
             Some(id) => {
                 database.set_setting(pipeline::SETTINGS_ROUTE_VISION, &serde_json::json!(id))?
+            }
+        }
+        match settings.study_provider_id.as_deref() {
+            None => {
+                database.remove_setting(pipeline::SETTINGS_ROUTE_STUDY)?;
+            }
+            Some(id) => {
+                database.set_setting(pipeline::SETTINGS_ROUTE_STUDY, &serde_json::json!(id))?
             }
         }
         database.set_setting(
@@ -1363,6 +1377,42 @@ pub async fn save_to_vocabulary(
     })
     .await
     .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+// ---------- 学习分析（Phase 9） ----------
+
+/// 学习分析请求 DTO（Popup 结果态发起）。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyRequestDto {
+    pub text: String,
+    pub language: Option<Language>,
+    /// 已有译文（帮助模型保持一致；可空）。
+    pub translation: Option<String>,
+}
+
+/// 学习分析：经 Router 的 Study 任务（未配置路由时跟随默认 Provider）
+/// 对文本做单词深析 / 句子解构，返回结构化学习卡片。
+#[tauri::command]
+pub async fn analyze_study(
+    state: tauri::State<'_, AppState>,
+    request: StudyRequestDto,
+) -> Result<lingua_translation::StudyAnalysis, AppError> {
+    let text = request.text.trim().to_string();
+    if text.is_empty() {
+        return Err(AppError::InvalidInput("text is required".to_string()));
+    }
+    let database = state.database.clone();
+    let router = pipeline::build_router(&database)?;
+    let provider = router.provider_for(lingua_ai::AiTask::Study)?;
+    let analyzer = lingua_translation::StudyAnalyzer::new(provider);
+    let study_request = lingua_translation::StudyRequest {
+        text,
+        source_language: request.language,
+        target_language: pipeline::target_language(&database)?,
+        translation: request.translation,
+    };
+    analyzer.analyze(&study_request).await
 }
 
 // ---------- 翻译历史（Phase 8） ----------

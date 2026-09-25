@@ -56,6 +56,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const defaultProviderId = ref<string>("");
   const translateProviderId = ref<string>(""); // "" = 跟随默认
   const visionProviderId = ref<string>(""); // "" = 自动挑选任一视觉能力 Provider
+  const studyProviderId = ref<string>(""); // "" = 跟随默认
   const targetLanguage = ref("zh");
   /** 同语言换向目标："" = 关闭（划到目标语言文本照翻/照搬）。 */
   const swapLanguage = ref("en");
@@ -74,6 +75,7 @@ export const useSettingsStore = defineStore("settings", () => {
       defaultProviderId.value = settings.defaultProviderId ?? "";
       translateProviderId.value = settings.translateProviderId ?? "";
       visionProviderId.value = settings.visionProviderId ?? "";
+      studyProviderId.value = settings.studyProviderId ?? "";
       targetLanguage.value = settings.targetLanguage;
       swapLanguage.value = settings.swapLanguage ?? "en";
       shortcut.value = settings.shortcut;
@@ -104,6 +106,7 @@ export const useSettingsStore = defineStore("settings", () => {
         defaultProviderId: defaultProviderId.value === "" ? null : defaultProviderId.value,
         translateProviderId: translateProviderId.value === "" ? null : translateProviderId.value,
         visionProviderId: visionProviderId.value === "" ? null : visionProviderId.value,
+        studyProviderId: studyProviderId.value === "" ? null : studyProviderId.value,
         targetLanguage: targetLanguage.value,
         swapLanguage: swapLanguage.value.trim(),
         shortcut: shortcut.value.trim() || "alt+t",
@@ -135,6 +138,7 @@ export const useSettingsStore = defineStore("settings", () => {
     defaultProviderId,
     translateProviderId,
     visionProviderId,
+    studyProviderId,
     targetLanguage,
     swapLanguage,
     shortcut,
