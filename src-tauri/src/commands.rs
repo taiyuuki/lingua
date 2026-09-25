@@ -716,6 +716,103 @@ fn copy_loose_resources(mdx_path: &std::path::Path, resource_dir: &std::path::Pa
     copied
 }
 
+/// 同目录同名 .mdd 及编号分卷（`name.mdd`、`name.1.mdd`、`name.2.mdd`…），
+/// 按编号升序返回存在的分卷路径。
+fn sibling_mdd_volumes(mdx_path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let stem = mdx_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let mut volumes = Vec::new();
+    if stem.is_empty() {
+        return volumes;
+    }
+    let main = mdx_path.with_extension("mdd");
+    if main.is_file() {
+        volumes.push(main);
+    }
+    let Some(dir) = mdx_path.parent() else {
+        return volumes;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return volumes;
+    };
+    let mut numbered: Vec<(u32, std::path::PathBuf)> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter_map(|path| {
+            let name = path.file_name().and_then(|name| name.to_str())?;
+            let mid = name
+                .strip_prefix(&format!("{stem}."))
+                .and_then(|mid| mid.strip_suffix(".mdd"))?;
+            if mid.is_empty() || !mid.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            Some((mid.parse::<u32>().ok()?, path))
+        })
+        .collect();
+    numbered.sort_by_key(|(index, _)| *index);
+    volumes.extend(numbered.into_iter().map(|(_, path)| path));
+    volumes
+}
+
+/// 词典包的 HTML 常引用 `O8C.css` 这类短名，而散装 css 的文件名
+/// 却是词典名（OALD8 的经典包装：`牛津高阶8简体.css`）。引用的
+/// css 在资源目录缺失、且目录里恰好只有一个 css 时，把它按引用
+/// 名复制一份作别名。
+fn alias_missing_css(resource_dir: &std::path::Path, htmls: &[&str]) {
+    use std::collections::BTreeSet;
+    let prefix = format!(
+        "{}://localhost/",
+        lingua_dictionary::html_sanitize::RESOURCE_SCHEME
+    );
+    let mut referenced: BTreeSet<String> = BTreeSet::new();
+    for html in htmls {
+        let mut rest = *html;
+        while let Some(at) = rest.find(&prefix) {
+            let after = &rest[at + prefix.len()..];
+            if let Some(slash) = after.find('/') {
+                let path = &after[slash + 1..];
+                let end = path
+                    .find(['"', ' ', '?'])
+                    .unwrap_or(path.len());
+                let path = &path[..end];
+                if path.to_ascii_lowercase().ends_with(".css") && !path.contains("..") {
+                    referenced.insert(path.to_string());
+                }
+            }
+            rest = &rest[at + prefix.len()..];
+        }
+    }
+    if referenced.is_empty() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(resource_dir) else {
+        return;
+    };
+    let css_files: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("css"))
+        })
+        .collect();
+    if css_files.len() != 1 {
+        return;
+    }
+    let source = &css_files[0];
+    for name in referenced {
+        let target = resource_dir.join(&name);
+        if !target.exists() && std::fs::copy(source, &target).is_ok() {
+            tracing::info!(alias = %name, "css alias created");
+        }
+    }
+}
+
 /// 从 MDX（MDict）文件导入词典。
 ///
 /// 大词库（几十万词条）分批写库并通过 `dictionary://import-progress`
@@ -753,31 +850,36 @@ pub async fn import_dictionary_mdx(
             )));
         }
 
-        // 资源收集：同目录同名 .mdd 资源包 + 同目录散装文件
-        // （OALD10 的 OALD8C.css 布局），统一落到 app_data/mdx/<id>/，
+        // 资源收集：同目录 .mdd（含编号分卷 name.1.mdd…）+ 同目录散装
+        // 文件（OALD10 的 OALD8C.css 布局），统一落到 app_data/mdx/<id>/，
         // 净化改写过的 mdx-res:// 链接由自定义协议从这里服务。
         // 失败只告警：词条照常导入，HTML 排版缺资源兜底显示。
         let mut mdd_extracted = false;
-        if let Ok(data_dir) = app.path().app_data_dir() {
-            let mdd_path = std::path::PathBuf::from(&request.path).with_extension("mdd");
-            let resource_dir = data_dir.join("mdx").join(&id);
-            let _ = std::fs::remove_dir_all(&resource_dir);
-            if std::fs::create_dir_all(&resource_dir).is_ok() {
-                if mdd_path.is_file() {
+        let resource_dir = app
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|data_dir| data_dir.join("mdx").join(&id));
+        if let Some(resource_dir) = resource_dir.as_ref() {
+            let _ = std::fs::remove_dir_all(resource_dir);
+            if std::fs::create_dir_all(resource_dir).is_ok() {
+                let mut total_extracted = 0usize;
+                for volume in sibling_mdd_volumes(std::path::Path::new(&request.path)) {
                     match lingua_dictionary::mdx::extract_mdd_resources(
-                        &mdd_path,
-                        &resource_dir,
+                        &volume,
+                        resource_dir,
                     ) {
                         Ok(count) => {
-                            mdd_extracted = count > 0;
-                            tracing::info!(dictionary = %id, count, "mdd resources extracted");
+                            total_extracted += count;
+                            tracing::info!(dictionary = %id, volume = %volume.display(), count, "mdd resources extracted");
                         }
                         Err(error) => {
                             tracing::warn!(%error, "mdd extraction failed; rendering without resources");
                         }
                     }
                 }
-                let loose = copy_loose_resources(std::path::Path::new(&request.path), &resource_dir);
+                mdd_extracted = total_extracted > 0;
+                let loose = copy_loose_resources(std::path::Path::new(&request.path), resource_dir);
                 if loose > 0 {
                     mdd_extracted = true;
                     tracing::info!(dictionary = %id, count = loose, "loose resources copied");
@@ -800,7 +902,9 @@ pub async fn import_dictionary_mdx(
         let mut skipped = 0usize;
         // 资源缺失检测：首批转换结果里出现 mdx-res:// 引用但 .mdd
         // 没解出来（不存在或解包失败）→ 结果里提示用户补 .mdd 重导。
+        // 同一批里顺带做 css 引用名对齐（O8C.css ↔ 词典名.css）。
         let mut resources_missing = false;
+        let mut first_batch_done = false;
         let references_resources = |batch: &[lingua_core::DictionaryEntry]| {
             batch.iter().any(|entry| {
                 entry.definitions.iter().any(|definition| {
@@ -824,6 +928,17 @@ pub async fn import_dictionary_mdx(
                     &gloss_language,
                     &id,
                 )?;
+                if !first_batch_done {
+                    first_batch_done = true;
+                    if let Some(resource_dir) = resource_dir.as_ref() {
+                        let htmls: Vec<&str> = batch
+                            .iter()
+                            .flat_map(|entry| entry.definitions.iter())
+                            .filter_map(|definition| definition.html.as_deref())
+                            .collect();
+                        alias_missing_css(resource_dir, &htmls);
+                    }
+                }
                 if !mdd_extracted && !resources_missing {
                     resources_missing = references_resources(&batch);
                 }
@@ -1342,5 +1457,50 @@ mod tests {
         let (id, name) = resolve_dictionary_identity(&request);
         assert!(id.starts_with("my-dict-"), "{id}");
         assert_eq!(name, "My Dict");
+    }
+
+    #[test]
+    fn numbered_mdd_volumes_collected_in_numeric_order() {
+        let dir = std::env::temp_dir().join("lingua-mdd-vol-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mdx = dir.join("dict.mdx");
+        std::fs::write(&mdx, b"x").unwrap();
+        for name in [
+            "dict.mdd",
+            "dict.2.mdd",
+            "dict.10.mdd",
+            "dict.1.mdd",
+            "dictx.mdd",
+            "dict.css.mdd",
+            "dict.a1.mdd",
+        ] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let volumes = sibling_mdd_volumes(&mdx);
+        let names: Vec<String> = volumes
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["dict.mdd", "dict.1.mdd", "dict.2.mdd", "dict.10.mdd"],
+            "{names:?}"
+        );
+    }
+
+    #[test]
+    fn css_alias_created_for_missing_reference() {
+        let dir = std::env::temp_dir().join("lingua-css-alias-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("牛津高阶8简体.css"), b"body{}").unwrap();
+        let html = r#"<link rel="stylesheet" href="mdx-res://localhost/d1/O8C.css">"#;
+        alias_missing_css(&dir, &[html]);
+        assert!(dir.join("O8C.css").is_file(), "应按引用名建立别名");
+        // 再次运行不覆盖已有别名。
+        std::fs::write(dir.join("O8C.css"), b"kept").unwrap();
+        alias_missing_css(&dir, &[html]);
+        assert_eq!(std::fs::read(dir.join("O8C.css")).unwrap(), b"kept");
     }
 }
