@@ -11,6 +11,7 @@ import {
   vocabularyBatchDelete,
   vocabularyBatchUpdate,
   vocabularyCount,
+  vocabularyLanguageCounts,
   type Mastery,
   type VocabularyFilterDto,
   type VocabularyItemDto,
@@ -51,18 +52,21 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
     learning: 0,
     mastered: 0,
   });
+  /** 语言分组计数（点击即筛）。 */
+  const languageCounts = ref<Array<[string, number]>>([]);
 
   const filter = reactive({
     search: "",
     tag: "",
     mastery: "" as Mastery | "",
+    language: "",
   });
 
   function filterDto(): VocabularyFilterDto {
     return {
       search: filter.search.trim() || null,
       tag: filter.tag || null,
-      language: null,
+      language: filter.language || null,
       mastery: filter.mastery === "" ? null : filter.mastery,
       limit: VOCABULARY_PAGE_SIZE,
       offset: (page.value - 1) * VOCABULARY_PAGE_SIZE,
@@ -81,6 +85,7 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
           mastery: option.value,
         });
       }
+      languageCounts.value = await vocabularyLanguageCounts();
       const maxPage = Math.max(1, Math.ceil(total.value / VOCABULARY_PAGE_SIZE));
       if (page.value > maxPage) {
         page.value = maxPage;
@@ -238,6 +243,7 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
     editError,
     filter,
     masteryCounts,
+    languageCounts,
     MASTERY_OPTIONS,
     VOCABULARY_PAGE_SIZE,
     dueCount,

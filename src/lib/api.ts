@@ -443,6 +443,11 @@ export async function listDueVocabulary(limit: number): Promise<VocabularyItemDt
   return invoke<VocabularyItemDto[]>("list_due_vocabulary", { limit });
 }
 
+/** 按语言分组计数（生词本分组筛选用）。 */
+export async function vocabularyLanguageCounts(): Promise<Array<[string, number]>> {
+  return invoke<Array<[string, number]>>("vocabulary_language_counts");
+}
+
 export async function getVocabularyTags(): Promise<string[]> {
   return invoke<string[]>("vocabulary_tags");
 }

@@ -435,6 +435,25 @@ impl Database {
             .map_err(db_err)?;
         Ok(rows)
     }
+
+    /// 按语言分组计数（分组筛选 chips 用），条数多的在前。
+    pub fn vocabulary_language_counts(&self) -> AppResult<Vec<(String, usize)>> {
+        let conn = self.lock_conn()?;
+        let mut statement = conn
+            .prepare(
+                "SELECT language, COUNT(*) FROM vocabulary
+                 GROUP BY language ORDER BY COUNT(*) DESC, language",
+            )
+            .map_err(db_err)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+            })
+            .map_err(db_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(db_err)?;
+        Ok(rows)
+    }
 }
 
 #[cfg(test)]

@@ -24,6 +24,7 @@ import {
   VOCABULARY_PAGE_SIZE,
   useVocabularyStore,
 } from "../stores/vocabulary";
+import { SUPPORTED_TARGET_LANGUAGES } from "../stores/settings";
 import { lookupEntriesForWord } from "../lib/dictRender";
 import type {
   DictionaryEntryDto,
@@ -42,12 +43,22 @@ const {
   editError,
   filter,
   masteryCounts,
+  languageCounts,
   dueCount,
   reviewQueue,
   reviewIndex,
   revealed,
   reviewStats,
 } = storeToRefs(store);
+
+/** 语言代码 → 中文名（复用目标语言表）。 */
+const languageLabel = (code: string): string =>
+  SUPPORTED_TARGET_LANGUAGES.find((lang) => lang.code === code)?.label ?? code;
+
+function toggleLanguageFilter(code: string): void {
+  filter.value.language = filter.value.language === code ? "" : code;
+  void store.applyFilters();
+}
 
 const editingId = ref<number | null>(null);
 const editForm = reactive({ notes: "", tags: "", mastery: "new" as Mastery });
@@ -426,6 +437,28 @@ onUnmounted(() => {
         @keydown.enter="store.applyFilters()"
         @blur="store.applyFilters()"
       />
+      <!-- 语言分组：点击筛选 -->
+      <div
+        v-if="languageCounts.length > 1"
+        class="vocab-stat-row"
+      >
+        <button
+          type="button"
+          :class="['vocab-stat', { active: filter.language === '' }]"
+          @click="filter.language = ''; store.applyFilters()"
+        >
+          全部语言
+        </button>
+        <button
+          v-for="[code, count] in languageCounts"
+          :key="code"
+          type="button"
+          :class="['vocab-stat', { active: filter.language === code }]"
+          @click="toggleLanguageFilter(code)"
+        >
+          {{ languageLabel(code) }} {{ count }}
+        </button>
+      </div>
       <div class="vocab-stat-row">
         <button
           type="button"

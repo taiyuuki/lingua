@@ -1064,6 +1064,17 @@ pub async fn list_due_vocabulary(
     .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
+/// 按语言分组计数（生词本分组筛选用）。
+#[tauri::command]
+pub async fn vocabulary_language_counts(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<(String, usize)>, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.vocabulary_language_counts())
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
 #[tauri::command]
 pub async fn vocabulary_tags(state: tauri::State<'_, AppState>) -> Result<Vec<String>, AppError> {
     let database = state.database.clone();

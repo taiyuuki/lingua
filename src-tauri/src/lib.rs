@@ -118,6 +118,7 @@ pub struct TrayState {
             commands::grade_vocabulary_review,
             commands::due_vocabulary_count,
             commands::list_due_vocabulary,
+            commands::vocabulary_language_counts,
             commands::update_vocabulary,
             commands::delete_vocabulary,
             commands::vocabulary_tags,
