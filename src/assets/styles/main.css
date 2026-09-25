@@ -641,11 +641,24 @@ body {
   user-select: text;
 }
 
+/* 词典结果：整卡不再滚动，卡片撑满剩余空间，释义列表内部滚动 */
+.popup-scroll:has(.popup-dictionary) {
+  overflow: hidden;
+}
+
+.popup-scroll:has(.popup-dictionary) .result-card {
+  flex: 1;
+  min-height: 0;
+}
+
 /* 词典视图 */
 .popup-dictionary {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .popup-dict-definitions {
@@ -656,6 +669,9 @@ body {
   gap: 6px;
   font-size: 12.5px;
   user-select: text;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .popup-dict-text {
@@ -712,11 +728,8 @@ body {
   mask-image: linear-gradient(to bottom, #000 78%, transparent);
 }
 
-/* 展开态：弹窗内的滚动上限（弹窗默认 560x480，可临时拖大） */
-.popup-dict-expanded {
-  max-height: 17em;
-  overflow-y: auto;
-}
+/* 展开态无固定上限：释义列表自适应撑满弹窗剩余空间、内部滚动
+   （见 .popup-dict-definitions）。 */
 
 .popup-dict-toggle {
   display: inline-block;

@@ -524,7 +524,6 @@ function onToolbarMouseDown(event: MouseEvent): void {
                   'popup-dict-rich-clamped':
                     isLongDefinition(definition.definition)
                     && !expandedDefinitions.has(index),
-                  'popup-dict-expanded': expandedDefinitions.has(index),
                 }]"
                 @click="onRichLinkClick($event)"
                 v-html="definition.html"
@@ -536,7 +535,6 @@ function onToolbarMouseDown(event: MouseEvent): void {
                   'popup-dict-clamped':
                     isLongDefinition(definition.definition)
                     && !expandedDefinitions.has(index),
-                  'popup-dict-expanded': expandedDefinitions.has(index),
                 }]"
               >
                 <span
