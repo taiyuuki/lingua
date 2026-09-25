@@ -64,16 +64,42 @@ function onDefinitionToggle(index: number, text: string): void {
   expandedDefinitions.value = next;
 }
 
-/** 富文本区点击：只处理词条内链（entry://）跳词；
- *  其余点击不拦截——文本区留给选择/复制，折叠只由按钮切换。 */
+/** 富文本区点击：词条内链（entry:///#锚点/词头）与发音链接（资源
+ *  音频，导入期由 sound:// 改写而来）；其余点击不拦截——文本区留给
+ *  选择/复制。词典自带的 <script> 不执行，发音用原生 Audio 播放。 */
+const AUDIO_URL = /\.(mp3|wav|ogg|m4a)(\?|$)/i;
+let currentAudio: HTMLAudioElement | null = null;
+
 function onRichLinkClick(event: MouseEvent): void {
   const anchor = (event.target as HTMLElement | null)?.closest?.(
-    'a[href^="entry://"]',
+    "a[href]",
   ) as HTMLAnchorElement | null;
-  if (anchor) {
-    event.preventDefault();
-    const word = (anchor.getAttribute("href") ?? "").replace(/^entry:\/\//, "");
+  if (!anchor) {
+    return;
+  }
+  const href = anchor.getAttribute("href") ?? "";
+  event.preventDefault();
+  if (href.startsWith("entry://#")) {
+    // 词条内锚点：滚动定位到 <a name>/[id]
+    const anchorId = CSS.escape(href.slice("entry://#".length));
+    const container = anchor.closest(".popup-dict-rich");
+    const target = container?.querySelector(
+      `[name="${anchorId}"], [id="${anchorId}"]`,
+    );
+    target?.scrollIntoView({ block: "start", behavior: "smooth" });
+    return;
+  }
+  if (href.startsWith("entry://")) {
+    const word = href.replace(/^entry:\/\//, "");
     void jumpToEntry(decodeURIComponent(word).trim());
+    return;
+  }
+  if (AUDIO_URL.test(anchor.href) && anchor.href.includes("mdx-res")) {
+    currentAudio?.pause();
+    currentAudio = new Audio(anchor.href);
+    void currentAudio.play().catch(() => {
+      // 音频缺失/解码失败静默
+    });
   }
 }
 

@@ -554,6 +554,17 @@ pub fn convert_entries_parallel(
     failure.map_or(Ok(converted), Err)
 }
 
+/// 只解析 MDD 的资源路径清单（不读 record 数据），用于导入前诊断。
+pub fn list_mdd_resources(mdd_path: &Path) -> AppResult<Vec<String>> {
+    let file = std::fs::read(mdd_path)
+        .map_err(|error| invalid(format!("无法读取 `{}`：{error}", mdd_path.display())))?;
+    let container = parse_container(file)?;
+    let mut paths: Vec<String> = container.keys.into_iter().map(|(path, _)| path).collect();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
 /// 解包 MDD 资源包（与 .mdx 同容器，key 是资源路径）到 `out_dir`。
 /// 返回写出的文件数；同偏移的别名 key 只写一次。
 pub fn extract_mdd_resources(mdd_path: &Path, out_dir: &Path) -> AppResult<usize> {

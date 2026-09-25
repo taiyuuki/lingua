@@ -42,7 +42,8 @@ impl DefinitionSanitizer {
         .collect();
 
         let mut tag_attributes: HashMap<&str, HashSet<&str>> = HashMap::new();
-        tag_attributes.insert("a", ["href"].into_iter().collect());
+        // name（词条内锚点目标，entry://#xxx 定位用）
+        tag_attributes.insert("a", ["href", "name"].into_iter().collect());
         tag_attributes.insert(
             "img",
             ["src", "alt", "width", "height"].into_iter().collect(),
@@ -78,14 +79,24 @@ impl DefinitionSanitizer {
         let mut builder = Builder::new();
         builder.tags(tags);
         builder.tag_attributes(tag_attributes);
-        builder.generic_attributes(["class", "style"].into_iter().collect());
-        // entry（词条内链）与 mdx-res（资源）是自有 scheme；data 允许
-        // 行内小图；file 是老词典的伪协议写法（过滤器里剥前缀改写）；
-        // 外链 http(s) 放行 scheme 但 a 的 href 过滤只留 entry://。
+        builder.generic_attributes(["class", "style", "id"].into_iter().collect());
+        // entry（词条内链）、sound（发音，过滤器里改写成资源 URL）与
+        // mdx-res（资源）是自有 scheme；data 允许行内小图；file 是老
+        // 词典的伪协议写法（过滤器里剥前缀改写）；外链 http(s) 放行
+        // scheme 但 a 的 href 过滤只留 entry:// 与 sound://。
         builder.url_schemes(
-            ["https", "http", "mailto", "data", "file", "entry", RESOURCE_SCHEME]
-                .into_iter()
-                .collect(),
+            [
+                "https",
+                "http",
+                "mailto",
+                "data",
+                "file",
+                "entry",
+                "sound",
+                RESOURCE_SCHEME,
+            ]
+            .into_iter()
+            .collect(),
         );
         builder.url_relative(UrlRelative::PassThrough);
         builder.link_rel(None);
@@ -93,9 +104,14 @@ impl DefinitionSanitizer {
             match (element, attribute) {
                 (_, "style") => Some(Cow::Owned(sanitize_style(value))),
                 ("a", "href") => {
-                    // 弹窗里外链点不开浏览器：只保留词条内链。
-                    if value.trim().to_ascii_lowercase().starts_with("entry://") {
+                    // 弹窗里外链点不开浏览器：词条内链原样保留
+                    // （entry://#锚点 / entry://词头），发音链接
+                    // （sound://路径）改写成资源 URL 由前端原生播放。
+                    let value = value.trim();
+                    if value.to_ascii_lowercase().starts_with("entry://") {
                         Some(Cow::Borrowed(value))
+                    } else if let Some(resource) = value.strip_prefix("sound://") {
+                        rewrite_resource(resource, &base)
                     } else {
                         None
                     }
@@ -250,12 +266,33 @@ mod tests {
     #[test]
     fn href_keeps_entry_links_drops_external() {
         let out = sanitize_definition_html(
-            "<a href=\"entry://hello\">see</a><a href=\"https://x.com\">web</a>",
+            "<a href=\"entry://hello\">see</a><a href=\"entry://#anchor\">pos</a><a href=\"https://x.com\">web</a>",
             "d1",
         );
         assert!(out.contains("entry://hello"), "{out}");
+        assert!(out.contains("entry://#anchor"), "{out}");
         assert!(!out.contains("https://x.com"), "{out}");
         assert!(out.contains("see"), "{out}");
+    }
+
+    #[test]
+    fn sound_links_are_rewritten_to_resource_urls() {
+        let out = sanitize_definition_html(
+            "<a href=\"sound://uk/a__gb_1.mp3\"><img src=\"uk_pron.png\"></a>",
+            "d1",
+        );
+        assert!(
+            out.contains("href=\"mdx-res://localhost/d1/uk/a__gb_1.mp3\""),
+            "{out}"
+        );
+        assert!(out.contains("mdx-res://localhost/d1/uk_pron.png"), "{out}");
+    }
+
+    #[test]
+    fn anchor_name_attribute_survives() {
+        // entry://#xxx 的定位目标：<a name="xxx">
+        let out = sanitize_definition_html("<a name=\"anchor-1\"></a><p>x</p>", "d1");
+        assert!(out.contains("name=\"anchor-1\""), "{out}");
     }
 
     #[test]

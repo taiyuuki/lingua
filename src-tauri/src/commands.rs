@@ -663,6 +663,46 @@ pub struct DictionaryImportProgress {
 /// MDX 每批写库的词条数（单事务粒度，控制数据库互斥锁的持有时长）。
 const MDX_IMPORT_BATCH: usize = 5000;
 
+/// 散装资源扩展名：与 .mdx 同目录平铺的样式/字体/图标
+/// （OALD10 的 OALD8C.css 布局：css 不在 .mdd 里而是和 mdx 并排）。
+const LOOSE_RESOURCE_EXTENSIONS: [&str; 14] = [
+    "css", "js", "png", "gif", "jpg", "jpeg", "svg", "webp", "bmp", "ico", "woff", "woff2",
+    "ttf", "otf",
+];
+
+/// 把 .mdx 同目录的散装资源文件复制进词典资源目录（根层）。
+/// 返回复制数量。.js 会被复制但净化器始终剥离 <script>，不会执行。
+fn copy_loose_resources(mdx_path: &std::path::Path, resource_dir: &std::path::Path) -> usize {
+    let Some(dir) = mdx_path.parent() else {
+        return 0;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut copied = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_resource = path.is_file()
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| {
+                    LOOSE_RESOURCE_EXTENSIONS
+                        .contains(&ext.to_ascii_lowercase().as_str())
+                });
+        if !is_resource {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if std::fs::copy(&path, resource_dir.join(name)).is_ok() {
+            copied += 1;
+        }
+    }
+    copied
+}
+
 /// 从 MDX（MDict）文件导入词典。
 ///
 /// 大词库（几十万词条）分批写库并通过 `dictionary://import-progress`
@@ -700,23 +740,34 @@ pub async fn import_dictionary_mdx(
             )));
         }
 
-        // 同目录同名 .mdd 资源包（CSS / 图片）：解包到 app_data/mdx/<id>/，
+        // 资源收集：同目录同名 .mdd 资源包 + 同目录散装文件
+        // （OALD10 的 OALD8C.css 布局），统一落到 app_data/mdx/<id>/，
         // 净化改写过的 mdx-res:// 链接由自定义协议从这里服务。
         // 失败只告警：词条照常导入，HTML 排版缺资源兜底显示。
         let mut mdd_extracted = false;
         if let Ok(data_dir) = app.path().app_data_dir() {
             let mdd_path = std::path::PathBuf::from(&request.path).with_extension("mdd");
-            if mdd_path.is_file() {
-                let resource_dir = data_dir.join("mdx").join(&id);
-                let _ = std::fs::remove_dir_all(&resource_dir);
-                match lingua_dictionary::mdx::extract_mdd_resources(&mdd_path, &resource_dir) {
-                    Ok(count) => {
-                        mdd_extracted = count > 0;
-                        tracing::info!(dictionary = %id, count, "mdd resources extracted");
+            let resource_dir = data_dir.join("mdx").join(&id);
+            let _ = std::fs::remove_dir_all(&resource_dir);
+            if std::fs::create_dir_all(&resource_dir).is_ok() {
+                if mdd_path.is_file() {
+                    match lingua_dictionary::mdx::extract_mdd_resources(
+                        &mdd_path,
+                        &resource_dir,
+                    ) {
+                        Ok(count) => {
+                            mdd_extracted = count > 0;
+                            tracing::info!(dictionary = %id, count, "mdd resources extracted");
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "mdd extraction failed; rendering without resources");
+                        }
                     }
-                    Err(error) => {
-                        tracing::warn!(%error, "mdd extraction failed; rendering without resources");
-                    }
+                }
+                let loose = copy_loose_resources(std::path::Path::new(&request.path), &resource_dir);
+                if loose > 0 {
+                    mdd_extracted = true;
+                    tracing::info!(dictionary = %id, count = loose, "loose resources copied");
                 }
             }
         }
