@@ -393,7 +393,9 @@ async fn translate_and_show(
     let dictionary = Arc::new(lingua_dictionary::SqliteDictionaryProvider::new(
         database.clone(),
     ));
-    let engine = TranslationEngine::new(ai_provider).with_dictionary(Some(dictionary));
+    let engine = TranslationEngine::new(ai_provider)
+        .with_dictionary(Some(dictionary))
+        .with_swap_language(pipeline::swap_language(database));
     let target_language = pipeline::target_language(database)?;
     let request = lingua_core::translation::TranslationRequest::new(
         source_text.clone(),

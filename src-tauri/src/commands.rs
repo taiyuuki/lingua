@@ -332,6 +332,9 @@ pub struct AppSettingsDto {
     pub vision_provider_id: Option<String>,
     /// 划词翻译的目标语言（BCP-47 基础码）。
     pub target_language: Language,
+    /// 同语言换向目标（BCP-47 基础码；空串 = 关闭）。
+    #[serde(default)]
+    pub swap_language: String,
     pub shortcut: String,
     /// 截图翻译快捷键（默认 alt+s；多显示器下跟随光标所在屏）。
     pub ocr_shortcut: String,
@@ -363,6 +366,8 @@ pub async fn get_app_settings(
                 pipeline::SETTINGS_ROUTE_VISION,
             ),
             target_language: Language::parse(&pipeline::read_target_language_code(&database)),
+            swap_language: pipeline::read_setting(&database, pipeline::SETTINGS_SWAP_LANGUAGE)
+                .unwrap_or_else(|| pipeline::DEFAULT_SWAP_LANGUAGE.to_string()),
             shortcut: pipeline::read_shortcut(&database),
             ocr_shortcut: pipeline::read_ocr_shortcut(&database),
             ui_theme: pipeline::read_ui_theme(&database),
@@ -424,6 +429,10 @@ pub async fn save_app_settings(
         database.set_setting(
             pipeline::SETTINGS_TARGET_LANGUAGE,
             &serde_json::json!(settings.target_language.code()),
+        )?;
+        database.set_setting(
+            pipeline::SETTINGS_SWAP_LANGUAGE,
+            &serde_json::json!(settings.swap_language.trim()),
         )?;
         database.set_setting(
             crate::ocr::SETTINGS_OCR_PROVIDER,

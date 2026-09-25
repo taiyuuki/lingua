@@ -66,6 +66,8 @@ export interface AppSettingsDto {
   translateProviderId: string | null;
   visionProviderId: string | null;
   targetLanguage: string;
+  /** 同语言换向目标（划到的文本已是目标语言时改译成该语言；"" = 关闭）。 */
+  swapLanguage: string;
   shortcut: string;
   /** 截图翻译快捷键（默认 alt+s；多显示器下跟随光标所在屏）。 */
   ocrShortcut: string;

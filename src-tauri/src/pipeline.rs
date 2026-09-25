@@ -24,6 +24,9 @@ pub const SETTINGS_DEFAULT_PROVIDER: &str = "ai.default_provider_id";
 pub const SETTINGS_ROUTE_TRANSLATE: &str = "router.task.translate";
 pub const SETTINGS_ROUTE_VISION: &str = "router.task.vision";
 pub const SETTINGS_TARGET_LANGUAGE: &str = "translation.target_language";
+/// 同语言换向目标（划到的文本已是目标语言时改译成该语言；
+/// 空串 = 关闭）。默认 en：目标 zh 的用户划到中文文本改译英文。
+pub const SETTINGS_SWAP_LANGUAGE: &str = "translation.swap_language";
 pub const SETTINGS_SHORTCUT: &str = "shortcut.translate";
 pub const SETTINGS_SHORTCUT_OCR: &str = "shortcut.ocr";
 /// 查词自动记入生词本（默认关；Popup 的 ★ 手动收藏不受影响）。
@@ -33,6 +36,7 @@ pub const DEFAULT_UI_THEME: &str = "dark";
 pub const DEFAULT_SHORTCUT: &str = "alt+t";
 pub const DEFAULT_OCR_SHORTCUT: &str = "alt+s";
 pub const DEFAULT_TARGET_LANGUAGE: &str = "zh";
+pub const DEFAULT_SWAP_LANGUAGE: &str = "en";
 
 /// 完整流程；任何失败都以 popup 错误态呈现（用户可感知）。
 pub async fn run_translation_pipeline(app: AppHandle) {
@@ -78,12 +82,15 @@ async fn run(app: &AppHandle) -> AppResult<()> {
     .await?;
 
     // 3. 经 Router 选出 Translate 任务的 Provider，组装引擎并翻译。
-    //    引擎内部先查词典（单词 + 命中时直接返回），否则走 AI。
+    //    引擎内部先查词典（单词 + 命中时直接返回），否则走 AI；
+    //    同语言换向由 Prompt 指令层处理（设置里可关）。
     let router = build_router(&state.database)?;
     let provider = router.provider_for(AiTask::Translate)?;
     let dictionary: Arc<dyn lingua_dictionary::DictionaryProvider> =
         Arc::new(SqliteDictionaryProvider::new(state.database.clone()));
-    let engine = TranslationEngine::new(provider).with_dictionary(Some(dictionary));
+    let engine = TranslationEngine::new(provider)
+        .with_dictionary(Some(dictionary))
+        .with_swap_language(swap_language(&state.database));
     let request = TranslationRequest::new(selected.text, target_language(&state.database)?);
     let app_for_delta = app.clone();
     let result = engine
@@ -286,6 +293,18 @@ pub fn read_ocr_shortcut(database: &Database) -> String {
 
 pub fn target_language(database: &Database) -> AppResult<Language> {
     Ok(Language::parse(&read_target_language_code(database)))
+}
+
+/// 同语言换向目标（`Some` = 启用；空串关闭 / 与目标相同由引擎视为无效）。
+pub fn swap_language(database: &Database) -> Option<Language> {
+    let code = read_setting(database, SETTINGS_SWAP_LANGUAGE)
+        .unwrap_or_else(|| DEFAULT_SWAP_LANGUAGE.to_string());
+    let code = code.trim().to_string();
+    if code.is_empty() {
+        None
+    } else {
+        Some(Language::parse(&code))
+    }
 }
 
 #[cfg(test)]

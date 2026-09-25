@@ -33,6 +33,9 @@ mod prompts {
 pub struct TranslationEngine {
     provider: Arc<dyn AIProvider>,
     dictionary: Option<Arc<dyn DictionaryProvider>>,
+    /// 同语言换向：源文本已经（几乎全部）是目标语言时，改译成该语言。
+    /// `None` 或与目标语言相同 = 不换向（保持旧行为）。
+    swap_language: Option<Language>,
 }
 
 impl TranslationEngine {
@@ -41,6 +44,7 @@ impl TranslationEngine {
         Self {
             provider,
             dictionary: None,
+            swap_language: None,
         }
     }
 
@@ -48,6 +52,42 @@ impl TranslationEngine {
     pub fn with_dictionary(mut self, dictionary: Option<Arc<dyn DictionaryProvider>>) -> Self {
         self.dictionary = dictionary;
         self
+    }
+
+    /// 配置同语言换向目标语言（如目标语言 zh 时设 en：划到中文文本
+    /// 自动改译英文）。换向是 Prompt 指令层行为：是否真的同语言由
+    /// 模型在阅读源文本时判断，两种 prompt 路径都会注入该规则。
+    pub fn with_swap_language(mut self, swap_language: Option<Language>) -> Self {
+        self.swap_language = swap_language;
+        self
+    }
+
+    /// 「同语言规则」prompt 片段：替换两条 system 模板里的
+    /// `{{same_language_rule}}` 占位符（JSON 路径与流式路径措辞不同）。
+    fn same_language_rule(&self, request: &TranslationRequest, streaming: bool) -> String {
+        let swap_active = self
+            .swap_language
+            .as_ref()
+            .is_some_and(|swap| *swap != request.target_language);
+        match (streaming, swap_active) {
+            (false, true) => format!(
+                "If the source text is already (almost entirely) in the target language, \
+                 DO NOT restate it: translate it into `{}` instead and say in \
+                 \"explanation\" that you swapped the direction.",
+                self.swap_language.as_ref().expect("checked above").code()
+            ),
+            (false, false) => "If the source text is already in the target language, \
+                 still translate it faithfully and say so in \"explanation\"."
+                .to_string(),
+            (true, true) => format!(
+                "If the source text is already (almost entirely) in the target language, \
+                 DO NOT restate it: translate it into `{}` instead and output only that.",
+                self.swap_language.as_ref().expect("checked above").code()
+            ),
+            (true, false) => "If the source text is already in the target language, \
+                 output it unchanged."
+                .to_string(),
+        }
     }
 
     pub async fn translate(&self, request: &TranslationRequest) -> AppResult<TranslationResult> {
@@ -197,7 +237,11 @@ impl TranslationEngine {
     fn render_prompt(&self, request: &TranslationRequest) -> (String, String) {
         let template =
             PromptTemplate::from_parts(prompts::TRANSLATE_SYSTEM, prompts::TRANSLATE_USER);
-        let vars = self.prompt_vars(request);
+        let mut vars = self.prompt_vars(request);
+        vars.insert(
+            "same_language_rule".to_string(),
+            self.same_language_rule(request, false),
+        );
         template.render(&vars)
     }
 
@@ -523,7 +567,10 @@ mod tests {
             vec![dict_entry("an ephemeral moment", "朝露之瞬")],
         )
         .await;
-        let result = engine.translate(&request("an ephemeral moment")).await.unwrap();
+        let result = engine
+            .translate(&request("an ephemeral moment"))
+            .await
+            .unwrap();
         assert_eq!(result.translated_text, "朝露之瞬");
         assert_eq!(result.dictionaries[0].lemma, "an ephemeral moment");
     }
@@ -531,10 +578,10 @@ mod tests {
     #[tokio::test]
     async fn long_cjk_phrase_uses_dictionary() {
         // CJK 超 4 字判为词组，同样走词典（此前只有 ≤4 字的「单词」走）。
-        let engine = engine_with_dict("should-not-be-called", vec![dict_entry(
-            "人工智能大模型",
-            "大规格 AI 模型",
-        )])
+        let engine = engine_with_dict(
+            "should-not-be-called",
+            vec![dict_entry("人工智能大模型", "大规格 AI 模型")],
+        )
         .await;
         let result = engine.translate(&request("人工智能大模型")).await.unwrap();
         assert_eq!(result.translated_text, "大规格 AI 模型");
@@ -627,5 +674,41 @@ mod tests {
         );
         assert!(user.contains("zh"));
         assert!(!engine.render_prompt(&request("x")).0.is_empty());
+    }
+
+    #[test]
+    fn same_language_rule_defaults_and_swap() {
+        // 默认（未配置换向）：保持旧行为措辞。
+        let plain = TranslationEngine::new(Arc::new(ScriptedProvider {
+            response: "{}".into(),
+        }));
+        let (system, _) = plain.render_prompt(&request("hello"));
+        assert!(
+            system.contains("still translate it faithfully"),
+            "默认 JSON 规则缺失: {system}"
+        );
+
+        // 配置换向（目标 zh → 换 en）：注入换向指令；换向语言与目标
+        // 语言相同（en→en）等于不换向，仍是默认措辞。
+        let swapping = TranslationEngine::new(Arc::new(ScriptedProvider {
+            response: "{}".into(),
+        }))
+        .with_swap_language(Some(Language::En));
+        let (system, _) = swapping.render_prompt(&request("hello"));
+        assert!(system.contains("translate it into `en` instead"));
+
+        let self_swap = TranslationEngine::new(Arc::new(ScriptedProvider {
+            response: "{}".into(),
+        }))
+        .with_swap_language(Some(Language::Zh));
+        let (system, _) = self_swap.render_prompt(&request("hello"));
+        assert!(
+            system.contains("still translate it faithfully"),
+            "换向语言 == 目标语言时应视为不换向: {system}"
+        );
+
+        // 流式路径的换向措辞（无 explanation 字段）。
+        let stream_rule = swapping.same_language_rule(&request("hello"), true);
+        assert!(stream_rule.contains("translate it into `en` instead and output only that"));
     }
 }

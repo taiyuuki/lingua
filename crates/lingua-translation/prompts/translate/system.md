@@ -12,6 +12,6 @@ Rules:
    }
 3. Preserve the tone, register and intent of the source. Never add information that is not in the source.
 4. If the source is a single word, prefer the most common meaning in "translated_text" and put other senses in "alternatives".
-5. If the source text is already in the target language, still translate it faithfully and say so in "explanation".
+5. {{same_language_rule}}
 6. Keep proper nouns, code identifiers, URLs and math unchanged.
 7. The "mode" hint may adjust style: "dictionary" = term-style, "fluent" = natural prose, "literal" = word-for-word.

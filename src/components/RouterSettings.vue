@@ -23,6 +23,7 @@ const {
   translateProviderId,
   visionProviderId,
   targetLanguage,
+  swapLanguage,
   shortcut,
   ocrShortcut,
   uiTheme,
@@ -60,6 +61,15 @@ const languageOptions = SUPPORTED_TARGET_LANGUAGES.map((lang) => ({
   label: `${lang.label}（${lang.code}）`,
   value: lang.code,
 }));
+
+// 同语言换向目标："" = 关闭；与目标语言相同由后端视为不换向。
+const swapLanguageOptions = [
+  { label: "关闭", value: "" },
+  ...SUPPORTED_TARGET_LANGUAGES.map((lang) => ({
+    label: `${lang.label}（${lang.code}）`,
+    value: lang.code,
+  })),
+];
 
 const ocrProviderOptions = [
   { label: 'Tesseract（本机）', value: 'tesseract' },
@@ -126,6 +136,12 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
           <n-select
             v-model:value="targetLanguage"
             :options="languageOptions"
+          />
+        </n-form-item>
+        <n-form-item label="同语言换向">
+          <n-select
+            v-model:value="swapLanguage"
+            :options="swapLanguageOptions"
           />
         </n-form-item>
         <n-form-item label="开机自启">
