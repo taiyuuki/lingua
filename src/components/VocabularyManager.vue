@@ -51,9 +51,9 @@ const {
   reviewStats,
 } = storeToRefs(store);
 
-/** 语言代码 → 中文名（复用目标语言表）。 */
+/** 语言代码 → 中文名（复用目标语言表；und = 早期自动记录未识别）。 */
 const languageLabel = (code: string): string =>
-  SUPPORTED_TARGET_LANGUAGES.find((lang) => lang.code === code)?.label ?? code;
+  code === "und" ? "未识别" : (SUPPORTED_TARGET_LANGUAGES.find((lang) => lang.code === code)?.label ?? code);
 
 function toggleLanguageFilter(code: string): void {
   filter.value.language = filter.value.language === code ? "" : code;

@@ -84,7 +84,9 @@ export function scrollToAnchor(container: HTMLElement | null, anchor: string): v
   target?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
-/** 跳词：查全部命中词典（每本一条，导入顺序）。未命中返回空数组。 */
+/** 跳词/词卡：查全部命中词典（每本一条，导入顺序）。未命中返回空数组。
+ *  带语言过滤查不到时回退全词典——生词记录的语言可能是 und
+ *  （早期 AI 路径没检测出语言）或与词典导入语言不一致。 */
 export async function lookupEntriesForWord(
   word: string,
   language?: string | null,
@@ -93,7 +95,11 @@ export async function lookupEntriesForWord(
     return [];
   }
   try {
-    return await lookupWordDictionaries(word, language);
+    const entries = await lookupWordDictionaries(word, language);
+    if (entries.length > 0 || !language) {
+      return entries;
+    }
+    return await lookupWordDictionaries(word, null);
   } catch {
     return [];
   }
