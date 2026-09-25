@@ -521,7 +521,7 @@ function onToolbarMouseDown(event: MouseEvent): void {
               <div
                 v-if="definition.html"
                 :class="['popup-dict-rich', {
-                  'popup-dict-clamped':
+                  'popup-dict-rich-clamped':
                     isLongDefinition(definition.definition)
                     && !expandedDefinitions.has(index),
                   'popup-dict-expanded': expandedDefinitions.has(index),
