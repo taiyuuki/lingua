@@ -530,6 +530,9 @@ pub struct ImportDictionaryRequest {
 pub struct ImportDictionaryResult {
     pub imported_entries: usize,
     pub skipped_lines: usize,
+    /// MDX 释义引用了 CSS/图片资源，但同目录没有配对的 .mdd
+    /// （或解包失败）——释义将以基础排版显示。
+    pub resources_missing: bool,
 }
 
 /// 从 TSV 文件导入词典（格式见 `lingua_dictionary::tsv` 模块文档）。
@@ -577,6 +580,7 @@ pub async fn import_dictionary_tsv(
         Ok(ImportDictionaryResult {
             imported_entries,
             skipped_lines: parsed.skipped_lines,
+            resources_missing: false,
         })
     })
     .await
@@ -641,6 +645,7 @@ pub async fn import_dictionary_mdx(
         // 同目录同名 .mdd 资源包（CSS / 图片）：解包到 app_data/mdx/<id>/，
         // 净化改写过的 mdx-res:// 链接由自定义协议从这里服务。
         // 失败只告警：词条照常导入，HTML 排版缺资源兜底显示。
+        let mut mdd_extracted = false;
         if let Ok(data_dir) = app.path().app_data_dir() {
             let mdd_path = std::path::PathBuf::from(&request.path).with_extension("mdd");
             if mdd_path.is_file() {
@@ -648,6 +653,7 @@ pub async fn import_dictionary_mdx(
                 let _ = std::fs::remove_dir_all(&resource_dir);
                 match lingua_dictionary::mdx::extract_mdd_resources(&mdd_path, &resource_dir) {
                     Ok(count) => {
+                        mdd_extracted = count > 0;
                         tracing::info!(dictionary = %id, count, "mdd resources extracted");
                     }
                     Err(error) => {
@@ -670,6 +676,19 @@ pub async fn import_dictionary_mdx(
         let mut raw_batch = Vec::with_capacity(MDX_IMPORT_BATCH);
         let mut imported = 0usize;
         let mut skipped = 0usize;
+        // 资源缺失检测：首批转换结果里出现 mdx-res:// 引用但 .mdd
+        // 没解出来（不存在或解包失败）→ 结果里提示用户补 .mdd 重导。
+        let mut resources_missing = false;
+        let references_resources = |batch: &[lingua_core::DictionaryEntry]| {
+            batch.iter().any(|entry| {
+                entry.definitions.iter().any(|definition| {
+                    definition
+                        .html
+                        .as_deref()
+                        .is_some_and(|html| html.contains(lingua_dictionary::html_sanitize::RESOURCE_SCHEME))
+                })
+            })
+        };
         for entry in dict.entries() {
             if entry.is_redirect() {
                 skipped += 1;
@@ -683,6 +702,9 @@ pub async fn import_dictionary_mdx(
                     &gloss_language,
                     &id,
                 )?;
+                if !mdd_extracted && !resources_missing {
+                    resources_missing = references_resources(&batch);
+                }
                 imported += database.import_dictionary(&meta, &batch)?;
                 emit_progress("importing", imported, total);
                 raw_batch.clear();
@@ -695,6 +717,9 @@ pub async fn import_dictionary_mdx(
                 &gloss_language,
                 &id,
             )?;
+            if !mdd_extracted && !resources_missing {
+                resources_missing = references_resources(&batch);
+            }
             imported += database.import_dictionary(&meta, &batch)?;
         }
         emit_progress("importing", imported, total);
@@ -703,11 +728,13 @@ pub async fn import_dictionary_mdx(
             imported,
             skipped,
             total,
+            resources_missing,
             "mdx dictionary imported"
         );
         Ok(ImportDictionaryResult {
             imported_entries: imported,
             skipped_lines: skipped,
+            resources_missing,
         })
     })
     .await

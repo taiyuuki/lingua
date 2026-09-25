@@ -55,6 +55,8 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
   const loadError = ref<string | null>(null);
   const importError = ref<string | null>(null);
   const importMessage = ref<string | null>(null);
+  /** MDX 引用了资源但没有配对 .mdd 的导入警告（与错误分开显示）。 */
+  const importWarning = ref<string | null>(null);
   const importing = ref(false);
   /** MDX 导入进度（TSV 导入恒为 null）。 */
   const importProgress = ref<DictionaryImportProgress | null>(null);
@@ -76,6 +78,7 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     Object.assign(form, emptyForm(), { open: true });
     importError.value = null;
     importMessage.value = null;
+    importWarning.value = null;
   }
 
   function closeForm(): void {
@@ -87,6 +90,7 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     importing.value = true;
     importError.value = null;
     importMessage.value = null;
+    importWarning.value = null;
     importProgress.value = null;
     const unsubscribe = await onDictionaryImportProgress((progress) => {
       importProgress.value = progress;
@@ -104,6 +108,12 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
         : await importDictionaryTsv(request);
       importMessage.value = `导入成功：${result.importedEntries} 个词条` +
         (result.skippedLines > 0 ? `，跳过 ${result.skippedLines} 条` : "");
+      if (result.resourcesMissing) {
+        importWarning.value =
+          "该词典的释义引用了 CSS/图片资源，但同目录没有配对的 .mdd，" +
+          "释义将以基础排版显示（图片缺失）。把对应的 .mdd 放到 .mdx " +
+          "旁边后删除重导，即可获得完整排版。";
+      }
       await load();
     } catch (error) {
       importError.value = describeError(error);
@@ -130,6 +140,7 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     loadError,
     importError,
     importMessage,
+    importWarning,
     importing,
     importProgress,
     form,

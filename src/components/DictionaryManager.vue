@@ -34,6 +34,7 @@ const {
   loadError,
   importError,
   importMessage,
+  importWarning,
   importing,
   importProgress,
   form,
@@ -278,6 +279,13 @@ onMounted(() => {
             {{ importMessage }}
           </n-text>
         </n-space>
+        <n-alert
+          v-if="importWarning"
+          type="warning"
+          :show-icon="true"
+        >
+          {{ importWarning }}
+        </n-alert>
         <n-alert
           v-if="importError"
           type="error"

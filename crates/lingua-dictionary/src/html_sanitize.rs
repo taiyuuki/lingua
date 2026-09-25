@@ -80,9 +80,10 @@ impl DefinitionSanitizer {
         builder.tag_attributes(tag_attributes);
         builder.generic_attributes(["class", "style"].into_iter().collect());
         // entry（词条内链）与 mdx-res（资源）是自有 scheme；data 允许
-        // 行内小图；外链 http(s) 放行 scheme 但 a 的 href 过滤只留 entry://。
+        // 行内小图；file 是老词典的伪协议写法（过滤器里剥前缀改写）；
+        // 外链 http(s) 放行 scheme 但 a 的 href 过滤只留 entry://。
         builder.url_schemes(
-            ["https", "http", "mailto", "data", "entry", RESOURCE_SCHEME]
+            ["https", "http", "mailto", "data", "file", "entry", RESOURCE_SCHEME]
                 .into_iter()
                 .collect(),
         );
@@ -188,7 +189,8 @@ pub fn normalize_resource_path(path: &str) -> Option<String> {
 }
 
 fn rewrite_resource<'v>(value: &'v str, base: &str) -> Option<Cow<'v, str>> {
-    let value = value.trim();
+    // `file://xxx.gif` 是老词典常见的伪协议写法，剥掉前缀按资源路径处理。
+    let value = value.trim().strip_prefix("file://").unwrap_or(value.trim());
     // 已是协议 URL（含行内 data:）原样保留，其余按词典资源路径改写。
     if value.contains("://") || value.starts_with("data:") {
         return Some(Cow::Borrowed(value));
@@ -284,5 +286,11 @@ mod tests {
     fn data_image_src_passes_through() {
         let out = sanitize_definition_html("<img src=\"data:image/png;base64,AAAA\">", "d1");
         assert!(out.contains("data:image/png"), "{out}");
+    }
+
+    #[test]
+    fn file_scheme_prefix_is_treated_as_resource_path() {
+        let out = sanitize_definition_html("<img src=\"file://dot.gif\">", "d1");
+        assert!(out.contains("mdx-res://localhost/d1/dot.gif"), "{out}");
     }
 }

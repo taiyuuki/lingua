@@ -121,6 +121,8 @@ export interface ImportDictionaryRequestDto {
 export interface ImportDictionaryResultDto {
   importedEntries: number;
   skippedLines: number;
+  /** MDX 释义引用了 CSS/图片资源但同目录没有配对 .mdd。 */
+  resourcesMissing: boolean;
 }
 
 export type Mastery = "new" | "learning" | "mastered";
