@@ -341,6 +341,9 @@ pub struct AppSettingsDto {
     pub ocr_provider: String,
     pub ocr_tesseract_path: String,
     pub ocr_http_url: String,
+    /// 查词自动记入生词本（默认关；Popup 的 ★ 手动收藏不受影响）。
+    #[serde(default)]
+    pub auto_vocabulary: bool,
 }
 
 #[tauri::command]
@@ -372,6 +375,12 @@ pub async fn get_app_settings(
             .unwrap_or_else(|| crate::ocr::DEFAULT_OCR_TESSERACT_PATH.to_string()),
             ocr_http_url: pipeline::read_setting(&database, crate::ocr::SETTINGS_OCR_HTTP_URL)
                 .unwrap_or_else(|| lingua_ocr::OCR_HTTP_DEFAULT_URL.to_string()),
+            auto_vocabulary: pipeline::read_setting(
+                &database,
+                pipeline::SETTINGS_AUTO_VOCABULARY,
+            )
+            .as_deref()
+                == Some("true"),
         })
     })
     .await
@@ -438,6 +447,10 @@ pub async fn save_app_settings(
         database.set_setting(
             pipeline::SETTINGS_SHORTCUT_OCR,
             &serde_json::json!(settings.ocr_shortcut),
+        )?;
+        database.set_setting(
+            pipeline::SETTINGS_AUTO_VOCABULARY,
+            &serde_json::json!(if settings.auto_vocabulary { "true" } else { "false" }),
         )?;
         Ok(())
     })

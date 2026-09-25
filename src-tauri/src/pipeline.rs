@@ -26,6 +26,8 @@ pub const SETTINGS_ROUTE_VISION: &str = "router.task.vision";
 pub const SETTINGS_TARGET_LANGUAGE: &str = "translation.target_language";
 pub const SETTINGS_SHORTCUT: &str = "shortcut.translate";
 pub const SETTINGS_SHORTCUT_OCR: &str = "shortcut.ocr";
+/// 查词自动记入生词本（默认关；Popup 的 ★ 手动收藏不受影响）。
+pub const SETTINGS_AUTO_VOCABULARY: &str = "vocabulary.auto_record";
 pub const SETTINGS_UI_THEME: &str = "ui.theme";
 pub const DEFAULT_UI_THEME: &str = "dark";
 pub const DEFAULT_SHORTCUT: &str = "alt+t";
@@ -93,10 +95,14 @@ async fn run(app: &AppHandle) -> AppResult<()> {
         })
         .await?;
 
-    // 4. 单词查询自动记入生词本（短语/句子不记）；
+    // 4. 单词查询自动记入生词本（短语/句子不记；可在设置里关，默认关）；
     //    在 result 移入 popup 前先取出需要的数据，写库放在 popup 展示之后。
     //    来源/例句取首选词典（dictionaries[0]）。
-    let vocabulary_record = if classify_text(&request.text) == TextKind::Word {
+    let auto_vocabulary =
+        read_setting(&state.database, SETTINGS_AUTO_VOCABULARY).as_deref() == Some("true");
+    let vocabulary_record = if auto_vocabulary
+        && classify_text(&request.text) == TextKind::Word
+    {
         Some(VocabularyUpsert {
             word: request.text.clone(),
             language: result

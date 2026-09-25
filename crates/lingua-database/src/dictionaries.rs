@@ -196,7 +196,28 @@ impl Database {
 
     /// 按词头查询（大小写不敏感），可按词头语言过滤。
     /// 返回的 [`DictionaryEntry::source`] 填充为词典名称（展示用）。
+    ///
+    /// 精确未命中时按 [`lingua_core::lemma_candidates`] 依次尝试
+    /// 词形还原候选（upscaling → upscale）——词典收录的是原形。
     pub fn lookup_entries(
+        &self,
+        lemma: &str,
+        language: Option<Language>,
+    ) -> AppResult<Vec<DictionaryEntry>> {
+        let entries = self.lookup_entries_exact(lemma, language.clone())?;
+        if !entries.is_empty() {
+            return Ok(entries);
+        }
+        for candidate in lingua_core::lemma::lemma_candidates(lemma) {
+            let found = self.lookup_entries_exact(&candidate, language.clone())?;
+            if !found.is_empty() {
+                return Ok(found);
+            }
+        }
+        Ok(entries)
+    }
+
+    fn lookup_entries_exact(
         &self,
         lemma: &str,
         language: Option<Language>,
@@ -361,6 +382,19 @@ mod tests {
         assert!(db.delete_dictionary("my-dict").unwrap());
         assert!(db.lookup_entries("hello", None).unwrap().is_empty());
         assert!(!db.delete_dictionary("my-dict").unwrap());
+    }
+
+    #[test]
+    fn inflected_form_falls_back_to_lemma() {
+        // 词典只收原形，变化形态靠词形还原候选兜底命中。
+        let db = Database::open_in_memory().unwrap();
+        db.migrate().unwrap();
+        db.import_dictionary(&meta("my-dict"), &[entry("upscale", "提升")])
+            .unwrap();
+        let inflected = db.lookup_entries("upscaling", Some(Language::En)).unwrap();
+        assert_eq!(inflected.len(), 1);
+        assert_eq!(inflected[0].lemma, "upscale");
+        assert_eq!(inflected[0].definitions[0].definition, "提升");
     }
 
     #[test]

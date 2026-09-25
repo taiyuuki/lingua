@@ -72,6 +72,8 @@ export interface AppSettingsDto {
   ocrProvider: string;
   ocrTesseractPath: string;
   ocrHttpUrl: string;
+  /** 查词自动记入生词本（默认关；Popup 的 ★ 手动收藏不受影响）。 */
+  autoVocabulary: boolean;
 }
 
 export interface TestProviderResult {

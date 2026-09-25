@@ -417,7 +417,7 @@ onUnmounted(() => {
         depth="3"
         style="display: block; margin-bottom: 12px"
       >
-        划词翻译单词时自动记录；点词头展开词典释义，点掌握度徽章一键切换。
+        「设置 → 查词自动记入生词本」开启后自动记录（默认关）；点词头展开词典释义，点掌握度徽章一键切换。
       </n-text>
       <n-alert
         v-if="loadError"

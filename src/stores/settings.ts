@@ -43,6 +43,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const ocrProvider = ref("tesseract");
   const ocrTesseractPath = ref("tesseract");
   const ocrHttpUrl = ref("http://127.0.0.1:8433/ocr");
+  const autoVocabulary = ref(false);
 
   async function load(): Promise<void> {
     loadError.value = null;
@@ -59,6 +60,7 @@ export const useSettingsStore = defineStore("settings", () => {
       ocrProvider.value = settings.ocrProvider;
       ocrTesseractPath.value = settings.ocrTesseractPath;
       ocrHttpUrl.value = settings.ocrHttpUrl;
+      autoVocabulary.value = settings.autoVocabulary ?? false;
       loaded.value = true;
     } catch (error) {
       loadError.value = describeError(error);
@@ -86,6 +88,7 @@ export const useSettingsStore = defineStore("settings", () => {
         ocrProvider: ocrProvider.value,
         ocrTesseractPath: ocrTesseractPath.value.trim() || "tesseract",
         ocrHttpUrl: ocrHttpUrl.value.trim(),
+        autoVocabulary: autoVocabulary.value,
       });
       saveMessage.value = "已保存";
       applyTheme(uiTheme.value);
@@ -115,6 +118,7 @@ export const useSettingsStore = defineStore("settings", () => {
     ocrProvider,
     ocrTesseractPath,
     ocrHttpUrl,
+    autoVocabulary,
     load,
     save,
   };

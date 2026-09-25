@@ -29,6 +29,7 @@ const {
   ocrProvider,
   ocrTesseractPath,
   ocrHttpUrl,
+  autoVocabulary,
   saveMessage,
   saveError,
   saving,
@@ -132,6 +133,9 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
             :value="autostart"
             @update:value="onAutostartChange"
           />
+        </n-form-item>
+        <n-form-item label="查词自动记入生词本">
+          <n-switch v-model:value="autoVocabulary" />
         </n-form-item>
         <n-form-item label="划词快捷键">
           <n-input

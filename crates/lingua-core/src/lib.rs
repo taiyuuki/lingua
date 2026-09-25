@@ -10,6 +10,7 @@
 pub mod dictionary;
 pub mod error;
 pub mod language;
+pub mod lemma;
 pub mod ocr;
 pub mod selection;
 pub mod translation;
