@@ -111,6 +111,7 @@ pub struct TrayState {
             commands::dictionary_lookup,
             commands::delete_dictionary,
             commands::list_vocabulary,
+            commands::vocabulary_count,
             commands::update_vocabulary,
             commands::delete_vocabulary,
             commands::vocabulary_tags,

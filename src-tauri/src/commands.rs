@@ -905,6 +905,7 @@ pub struct VocabularyFilterDto {
     pub language: Option<Language>,
     pub mastery: Option<Mastery>,
     pub limit: u32,
+    pub offset: u32,
 }
 
 #[tauri::command]
@@ -914,18 +915,37 @@ pub async fn list_vocabulary(
 ) -> Result<Vec<lingua_core::VocabularyItem>, AppError> {
     let database = state.database.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let dto = filter.unwrap_or_default();
-        let filter = VocabularyFilter {
-            search: dto.search,
-            tag: dto.tag,
-            language: dto.language,
-            mastery: dto.mastery,
-            limit: dto.limit,
-        };
+        let filter = vocabulary_filter_from(filter.unwrap_or_default());
         database.list_vocabulary(&filter)
     })
     .await
     .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 与筛选条件匹配的词条总数（分页用）。
+#[tauri::command]
+pub async fn vocabulary_count(
+    state: tauri::State<'_, AppState>,
+    filter: Option<VocabularyFilterDto>,
+) -> Result<usize, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let filter = vocabulary_filter_from(filter.unwrap_or_default());
+        database.count_vocabulary(&filter)
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+fn vocabulary_filter_from(dto: VocabularyFilterDto) -> VocabularyFilter {
+    VocabularyFilter {
+        search: dto.search,
+        tag: dto.tag,
+        language: dto.language,
+        mastery: dto.mastery,
+        limit: dto.limit,
+        offset: dto.offset,
+    }
 }
 
 #[tauri::command]

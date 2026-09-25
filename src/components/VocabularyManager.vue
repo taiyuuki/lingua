@@ -11,40 +11,45 @@ import {
   NInput,
   NList,
   NListItem,
+  NPagination,
   NPopconfirm,
   NSelect,
   NSpace,
   NTag,
   NText,
-  NThing,
 } from "naive-ui";
-import { MASTERY_OPTIONS, useVocabularyStore } from "../stores/vocabulary";
+import {
+  MASTERY_OPTIONS,
+  VOCABULARY_PAGE_SIZE,
+  useVocabularyStore,
+} from "../stores/vocabulary";
 import type { Mastery, VocabularyItemDto } from "../lib/api";
 
 const store = useVocabularyStore();
-const { items, tags, loadError, editError, filter } = storeToRefs(store);
+const { items, total, page, tags, loadError, editError, filter } =
+  storeToRefs(store);
 
 const editingId = ref<number | null>(null);
 const editForm = reactive({ notes: "", tags: "", mastery: "new" as Mastery });
 
-const masteryTagType = computed(() => (mastery: Mastery) =>
-  mastery === "mastered" ? "success" : mastery === "learning" ? "warning" : "default",
-);
+const masteryTagType = (mastery: Mastery): "success" | "warning" | "default" =>
+  mastery === "mastered" ? "success" : mastery === "learning" ? "warning" : "default";
 
-const masteryLabel = computed(() => (mastery: Mastery) =>
-  MASTERY_OPTIONS.find((option) => option.value === mastery)?.label ?? mastery,
-);
+const masteryLabel = (mastery: Mastery): string =>
+  MASTERY_OPTIONS.find((option) => option.value === mastery)?.label ?? mastery;
 
 const masteryOptions = MASTERY_OPTIONS.map((option) => ({
   label: option.label,
   value: option.value,
 }));
 
-const tagOptions = computed(() => tags.value.map((tag) => ({ label: tag, value: tag })));
+const tagOptions = computed(() =>
+  tags.value.map((tag) => ({ label: tag, value: tag })),
+);
 
-function applyFilters(): void {
-  void store.load();
-}
+const pageCount = computed(() =>
+  Math.max(1, Math.ceil(total.value / VOCABULARY_PAGE_SIZE)),
+);
 
 function startEdit(item: VocabularyItemDto): void {
   editingId.value = item.id;
@@ -72,7 +77,7 @@ onMounted(() => {
   >
     <template #header-extra>
       <n-text depth="3">
-        {{ items.length }} 条
+        共 {{ total }} 条
       </n-text>
     </template>
 
@@ -81,7 +86,6 @@ onMounted(() => {
       style="display: block; margin-bottom: 12px"
     >
       划词翻译单词时自动记录（含查询次数）；Popup 里的 ★ 只针对生词，可随时移除。
-      词典回答「是什么意思」，生词本记录「对你意味着什么」。
     </n-text>
     <n-alert
       v-if="loadError"
@@ -92,31 +96,31 @@ onMounted(() => {
       {{ loadError }}
     </n-alert>
 
-    <!-- 筛选 -->
+    <!-- 筛选：固定三列，回车/变更即应用 -->
     <div class="vocab-filter">
       <n-input
         v-model:value="filter.search"
         placeholder="搜索（词 / 译文 / 笔记），回车应用"
         clearable
-        @keydown.enter="applyFilters"
-        @blur="applyFilters"
+        @keydown.enter="store.applyFilters()"
+        @blur="store.applyFilters()"
       />
       <n-select
         v-model:value="filter.mastery"
-        :options="[{ label: '全部掌握程度', value: '' }, ...MASTERY_OPTIONS.map((option) => ({ label: option.label, value: option.value }))]"
+        :options="[{ label: '全部掌握程度', value: '' }, ...masteryOptions]"
         placeholder="掌握程度"
-        @update:value="applyFilters"
+        @update:value="store.applyFilters()"
       />
       <n-select
         v-model:value="filter.tag"
         :options="[{ label: '全部标签', value: '' }, ...tagOptions]"
         placeholder="标签"
         clearable
-        @update:value="applyFilters"
+        @update:value="store.applyFilters()"
       />
     </div>
 
-    <!-- 词条列表 -->
+    <!-- 词条：分页每页 20 条，卡片三层（头/摘要/底栏），按钮固定右下 -->
     <n-list
       v-if="items.length > 0"
       :show-divider="true"
@@ -126,66 +130,54 @@ onMounted(() => {
         :key="item.id"
       >
         <!-- 浏览态 -->
-        <div v-if="editingId !== item.id">
-          <n-thing
-            content-style="display: flex; justify-content: space-between; gap: 12px; align-items: flex-start;"
-          >
-            <div class="row-main">
-              <n-space
-                :size="6"
-                align="center"
-                style="margin-bottom: 2px"
-              >
-                <n-text
-                  strong
-                  style="font-size: 15px"
-                >
-                  {{ item.word }}
-                </n-text>
-                <n-tag
-                  size="small"
-                  :type="masteryTagType(item.mastery)"
-                  :bordered="item.mastery === 'new'"
-                >
-                  {{ masteryLabel(item.mastery) }}
-                </n-tag>
-                <n-tag
-                  v-for="tag in item.tags"
-                  :key="tag"
-                  size="small"
-                  :bordered="false"
-                >
-                  {{ tag }}
-                </n-tag>
-              </n-space>
-              <n-text
-                v-if="item.translation"
-                class="row-detail clamp-2"
-                style="font-size: 13.5px"
-                :title="item.translation"
-              >
-                {{ item.translation }}
-              </n-text>
-              <n-text
-                v-if="item.notes"
-                depth="3"
-                class="row-detail clamp-2"
-                :title="item.notes"
-              >
-                {{ item.notes }}
-              </n-text>
-              <n-text
-                depth="3"
-                class="row-detail"
-                style="font-size: 11.5px"
-              >
-                查询 {{ item.lookupCount }} · 复习 {{ item.reviewCount }} ·
-                {{ item.lastSeenAt.slice(0, 10) }} · {{ item.source }}
-              </n-text>
-            </div>
-            <n-space :size="6">
+        <div
+          v-if="editingId !== item.id"
+          class="vocab-item"
+        >
+          <div class="vocab-head">
+            <span class="vocab-word">{{ item.word }}</span>
+            <n-tag
+              size="small"
+              :type="masteryTagType(item.mastery)"
+              :bordered="item.mastery === 'new'"
+            >
+              {{ masteryLabel(item.mastery) }}
+            </n-tag>
+            <n-tag
+              v-for="tag in item.tags"
+              :key="tag"
+              size="small"
+              :bordered="false"
+            >
+              {{ tag }}
+            </n-tag>
+          </div>
+
+          <div class="vocab-body">
+            <p
+              v-if="item.translation"
+              class="vocab-translation clamp-2"
+              :title="item.translation"
+            >
+              {{ item.translation }}
+            </p>
+            <p
+              v-if="item.notes"
+              class="vocab-notes clamp-2"
+              :title="item.notes"
+            >
+              {{ item.notes }}
+            </p>
+          </div>
+
+          <div class="vocab-foot">
+            <span class="vocab-meta clamp-1">
+              查询 {{ item.lookupCount }} · 复习 {{ item.reviewCount }} ·
+              {{ item.lastSeenAt.slice(0, 10) }} · {{ item.source }}
+            </span>
+            <span class="vocab-actions">
               <n-button
-                size="small"
+                size="tiny"
                 secondary
                 @click="startEdit(item)"
               >
@@ -197,7 +189,7 @@ onMounted(() => {
               >
                 <template #trigger>
                   <n-button
-                    size="small"
+                    size="tiny"
                     type="error"
                     secondary
                   >
@@ -206,8 +198,8 @@ onMounted(() => {
                 </template>
                 从生词本移除该词条，确定？
               </n-popconfirm>
-            </n-space>
-          </n-thing>
+            </span>
+          </div>
         </div>
 
         <!-- 编辑态 -->
@@ -285,11 +277,25 @@ onMounted(() => {
       description="还没有生词记录。用 alt+t 翻译一个单词试试。"
       style="margin: 12px 0"
     />
+
+    <!-- 分页 -->
+    <div
+      v-if="pageCount > 1"
+      class="vocab-pagination"
+    >
+      <n-pagination
+        :page="page"
+        :page-count="pageCount"
+        :page-size="VOCABULARY_PAGE_SIZE"
+        :item-count="total"
+        @update:page="store.turnTo($event)"
+      />
+    </div>
   </n-card>
 </template>
 
 <style scoped>
-/* 筛选行：固定三列（搜索占半），不再随窗口随机换行 */
+/* 筛选行：固定三列（搜索占半），不随窗口随机换行 */
 .vocab-filter {
   display: grid;
   grid-template-columns: 2fr 1fr 1fr;
@@ -297,13 +303,72 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
-.row-main {
+/* 词条卡片：垂直三层，杜绝左右两栏挤压导致的按钮漂移 */
+.vocab-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
 }
 
-.row-detail {
-  font-size: 12.5px;
+.vocab-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.vocab-word {
+  font-weight: 600;
+  font-size: 15px;
   overflow-wrap: anywhere;
+}
+
+.vocab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vocab-translation {
+  margin: 0;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.vocab-notes {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* 底栏：meta 单行截断在左，操作按钮整体固定右侧、永不换行 */
+.vocab-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-top: 2px;
+}
+
+.vocab-meta {
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+
+.vocab-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.vocab-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
 }
 </style>

@@ -34,10 +34,59 @@ pub struct VocabularyFilter {
     pub mastery: Option<Mastery>,
     /// 上限，默认 500，避免一次性拉全量。
     pub limit: u32,
+    /// 分页偏移（与 limit 搭配）。
+    pub offset: u32,
 }
 
 fn json_array(raw: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
+}
+
+/// 筛选条件 → (where 子句, 绑定值)，list/count 共用。
+fn vocabulary_conditions(filter: &VocabularyFilter) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
+    let mut conditions: Vec<String> = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(search) = filter
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let pattern = format!("%{search}%");
+        conditions
+            .push("(word LIKE ?1 OR translation LIKE ?1 OR notes LIKE ?1)".replace("?1", "?"));
+        values.push(Box::new(pattern.clone()));
+        values.push(Box::new(pattern.clone()));
+        values.push(Box::new(pattern));
+    }
+    if let Some(tag) = filter
+        .tag
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        conditions.push(
+            "EXISTS (SELECT 1 FROM json_each(vocabulary.tags) WHERE json_each.value = ?)"
+                .to_string(),
+        );
+        values.push(Box::new(tag.to_string()));
+    }
+    if let Some(language) = &filter.language {
+        conditions.push("language = ?".to_string());
+        values.push(Box::new(language.code().to_string()));
+    }
+    if let Some(mastery) = filter.mastery {
+        conditions.push("mastery = ?".to_string());
+        values.push(Box::new(mastery.to_db()));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        "1=1".to_string()
+    } else {
+        conditions.join(" AND ")
+    };
+    (where_clause, values)
 }
 
 fn to_json_array(values: &[String]) -> String {
@@ -120,51 +169,12 @@ impl Database {
 
     /// 按筛选条件列出生词，最近查看在前。
     pub fn list_vocabulary(&self, filter: &VocabularyFilter) -> AppResult<Vec<VocabularyItem>> {
-        let mut conditions: Vec<String> = Vec::new();
-        let mut values: Vec<Box<dyn ToSql>> = Vec::new();
-
-        if let Some(search) = filter
-            .search
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            let pattern = format!("%{search}%");
-            conditions
-                .push("(word LIKE ?1 OR translation LIKE ?1 OR notes LIKE ?1)".replace("?1", "?"));
-            values.push(Box::new(pattern.clone()));
-            values.push(Box::new(pattern.clone()));
-            values.push(Box::new(pattern));
-        }
-        if let Some(tag) = filter
-            .tag
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            conditions.push(
-                "EXISTS (SELECT 1 FROM json_each(vocabulary.tags) WHERE json_each.value = ?)"
-                    .to_string(),
-            );
-            values.push(Box::new(tag.to_string()));
-        }
-        if let Some(language) = &filter.language {
-            conditions.push("language = ?".to_string());
-            values.push(Box::new(language.code().to_string()));
-        }
-        if let Some(mastery) = filter.mastery {
-            conditions.push("mastery = ?".to_string());
-            values.push(Box::new(mastery.to_db()));
-        }
-
+        let (where_clause, values) = vocabulary_conditions(filter);
         let limit = if filter.limit == 0 { 500 } else { filter.limit };
-        let where_clause = if conditions.is_empty() {
-            "1=1".to_string()
-        } else {
-            conditions.join(" AND ")
-        };
         let sql = format!(
-            "SELECT {ITEM_COLUMNS} FROM vocabulary WHERE {where_clause} ORDER BY last_seen_at DESC, id DESC LIMIT {limit}"
+            "SELECT {ITEM_COLUMNS} FROM vocabulary WHERE {where_clause} \
+             ORDER BY last_seen_at DESC, id DESC LIMIT {limit} OFFSET {}",
+            filter.offset
         );
 
         let conn = self.lock_conn()?;
@@ -178,6 +188,20 @@ impl Database {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(db_err)?;
         Ok(rows)
+    }
+
+    /// 与筛选条件匹配的词条总数（分页用）。
+    pub fn count_vocabulary(&self, filter: &VocabularyFilter) -> AppResult<usize> {
+        let (where_clause, values) = vocabulary_conditions(filter);
+        let sql = format!("SELECT COUNT(*) FROM vocabulary WHERE {where_clause}");
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            &sql,
+            params_from_iter(values.iter().map(|value| value.as_ref())),
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as usize)
+        .map_err(db_err)
     }
 
     /// 用户编辑：笔记 / 标签 / 掌握度。返回是否存在该条。

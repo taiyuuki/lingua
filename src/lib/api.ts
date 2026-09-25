@@ -150,6 +150,7 @@ export interface VocabularyFilterDto {
   language: string | null;
   mastery: Mastery | null;
   limit: number;
+  offset: number;
 }
 
 export interface SaveVocabularyRequestDto {
@@ -373,6 +374,13 @@ export async function listVocabulary(
   filter: VocabularyFilterDto,
 ): Promise<VocabularyItemDto[]> {
   return invoke<VocabularyItemDto[]>("list_vocabulary", { filter });
+}
+
+/** 与筛选条件匹配的词条总数（分页用）。 */
+export async function vocabularyCount(
+  filter: VocabularyFilterDto,
+): Promise<number> {
+  return invoke<number>("vocabulary_count", { filter });
 }
 
 export async function updateVocabulary(
