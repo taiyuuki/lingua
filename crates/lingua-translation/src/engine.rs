@@ -36,6 +36,33 @@ pub struct TranslationEngine {
     /// 同语言换向：源文本已经（几乎全部）是目标语言时，改译成该语言。
     /// `None` 或与目标语言相同 = 不换向（保持旧行为）。
     swap_language: Option<Language>,
+    /// 用户自定义 system prompt 覆盖（JSON 路径 / 流式路径）；
+    /// `None` = 用内置模板。user 模板不支持覆盖（原文位置在内，覆盖
+    /// 丢失原文会让翻译直接失败）。
+    prompt_override: PromptOverride,
+}
+
+/// 自定义 Prompt 覆盖（空串字段视为未覆盖）。
+#[derive(Debug, Clone, Default)]
+pub struct PromptOverride {
+    pub translate_system: Option<String>,
+    pub translate_stream_system: Option<String>,
+}
+
+impl PromptOverride {
+    /// 空白串归一为 `None`（设置存储以空串表示「用内置」）。
+    pub fn normalized(translate_system: Option<&str>, stream_system: Option<&str>) -> Self {
+        fn clean(value: Option<&str>) -> Option<String> {
+            value
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+        }
+        Self {
+            translate_system: clean(translate_system),
+            translate_stream_system: clean(stream_system),
+        }
+    }
 }
 
 impl TranslationEngine {
@@ -45,12 +72,19 @@ impl TranslationEngine {
             provider,
             dictionary: None,
             swap_language: None,
+            prompt_override: PromptOverride::default(),
         }
     }
 
     /// 挂载词典（单词查询优先走词典）。可传 `None` 保持纯 AI 行为。
     pub fn with_dictionary(mut self, dictionary: Option<Arc<dyn DictionaryProvider>>) -> Self {
         self.dictionary = dictionary;
+        self
+    }
+
+    /// 配置自定义 system prompt（`None` = 用内置模板）。
+    pub fn with_prompt_override(mut self, prompt_override: PromptOverride) -> Self {
+        self.prompt_override = prompt_override;
         self
     }
 
@@ -123,10 +157,12 @@ impl TranslationEngine {
             return Ok(result);
         }
 
-        let chat_request = ChatRequest::simple(
-            prompts::STREAM_SYSTEM.to_string(),
-            self.user_prompt(request),
-        );
+        let system = self
+            .prompt_override
+            .translate_stream_system
+            .clone()
+            .unwrap_or_else(|| prompts::STREAM_SYSTEM.to_string());
+        let chat_request = ChatRequest::simple(system, self.user_prompt(request));
         let mut accumulated = String::new();
         let response = self
             .provider
@@ -236,8 +272,13 @@ impl TranslationEngine {
     }
 
     fn render_prompt(&self, request: &TranslationRequest) -> (String, String) {
-        let template =
-            PromptTemplate::from_parts(prompts::TRANSLATE_SYSTEM, prompts::TRANSLATE_USER);
+        let template = PromptTemplate::from_parts(
+            self.prompt_override
+                .translate_system
+                .as_deref()
+                .unwrap_or(prompts::TRANSLATE_SYSTEM),
+            prompts::TRANSLATE_USER,
+        );
         let mut vars = self.prompt_vars(request);
         vars.insert(
             "same_language_rule".to_string(),
@@ -711,5 +752,43 @@ mod tests {
         // 流式路径的换向措辞（无 explanation 字段）。
         let stream_rule = swapping.same_language_rule(&request("hello"), true);
         assert!(stream_rule.contains("translate it into `en` instead and output only that"));
+    }
+
+    #[test]
+    fn prompt_override_replaces_system_only() {
+        // 自定义 system 生效（JSON 与流式两条路径），user 模板不受影响。
+        let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
+            response: "{}".into(),
+        }))
+        .with_prompt_override(PromptOverride {
+            translate_system: Some("CUSTOM JSON RULES {{target_language}}".into()),
+            translate_stream_system: Some("CUSTOM STREAM RULES".into()),
+        });
+
+        let (system, user) = engine.render_prompt(&request("hello"));
+        assert!(system.contains("CUSTOM JSON RULES zh"), "{system}");
+        assert!(user.contains("hello"), "user 模板仍带原文");
+
+        let stream_system = engine
+            .prompt_override
+            .translate_stream_system
+            .clone()
+            .unwrap_or_default();
+        assert_eq!(stream_system, "CUSTOM STREAM RULES");
+    }
+
+    #[test]
+    fn prompt_override_blank_falls_back_to_builtin() {
+        let engine = TranslationEngine::new(Arc::new(ScriptedProvider {
+            response: "{}".into(),
+        }))
+        .with_prompt_override(PromptOverride::normalized(Some("   "), Some("")));
+        let (system, _) = engine.render_prompt(&request("hello"));
+        assert!(
+            system.contains("STRICT JSON only"),
+            "空白覆盖应回退内置模板: {system}"
+        );
+        assert!(engine.prompt_override.translate_system.is_none());
+        assert!(engine.prompt_override.translate_stream_system.is_none());
     }
 }

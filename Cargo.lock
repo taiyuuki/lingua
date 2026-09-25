@@ -2644,6 +2644,7 @@ dependencies = [
  "lingua-core",
  "lingua-database",
  "lingua-dictionary",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

@@ -25,6 +25,8 @@ const {
   studyProviderId,
   targetLanguage,
   swapLanguage,
+  promptTranslateSystem,
+  promptTranslateStream,
   shortcut,
   ocrShortcut,
   uiTheme,
@@ -76,6 +78,11 @@ const ocrProviderOptions = [
   { label: 'Tesseract（本机）', value: 'tesseract' },
   { label: '本地 HTTP 服务', value: 'http' },
 ];
+
+// Prompt 变量提示（模板里不能直接写字面 {{...}}，会被解析成插值）。
+const PROMPT_VARS = ["target_language", "source_language", "mode", "context", "same_language_rule"]
+  .map((name) => `{{${name}}}`)
+  .join(" ");
 
 onMounted(() => {
   void settingsStore.load();
@@ -237,6 +244,43 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
           />
         </n-form-item>
       </div>
+
+      <p class="form-section-title">
+        翻译 Prompt（高级）
+      </p>
+      <n-text
+        depth="3"
+        style="display: block; margin-bottom: 10px; font-size: 12px"
+      >
+        留空使用内置模板。可用变量：<code>{{ PROMPT_VARS }}</code>（原文由固定
+        user 模板携带，无需包含）。JSON 路径要求模型返回结构化结果，流式路径输出纯文本，请勿混用。
+      </n-text>
+      <n-form-item label="结构化翻译 system（返回 JSON 的非流式路径）">
+        <n-input
+          v-model:value="promptTranslateSystem"
+          type="textarea"
+          :rows="4"
+          placeholder="留空使用内置模板"
+        />
+      </n-form-item>
+      <n-form-item label="流式翻译 system（打字机效果路径）">
+        <n-input
+          v-model:value="promptTranslateStream"
+          type="textarea"
+          :rows="4"
+          placeholder="留空使用内置模板"
+        />
+      </n-form-item>
+      <n-space style="margin-bottom: 12px">
+        <n-button
+          size="small"
+          secondary
+          :disabled="!promptTranslateSystem && !promptTranslateStream"
+          @click="promptTranslateSystem = ''; promptTranslateStream = ''"
+        >
+          恢复内置模板
+        </n-button>
+      </n-space>
 
       <n-space
         align="center"

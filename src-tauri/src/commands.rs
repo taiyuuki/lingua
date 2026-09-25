@@ -337,6 +337,12 @@ pub struct AppSettingsDto {
     /// 同语言换向目标（BCP-47 基础码；空串 = 关闭）。
     #[serde(default)]
     pub swap_language: String,
+    /// 自定义翻译 system prompt（JSON 路径）；空串 = 用内置。
+    #[serde(default)]
+    pub prompt_translate_system: String,
+    /// 自定义翻译 system prompt（流式路径）；空串 = 用内置。
+    #[serde(default)]
+    pub prompt_translate_stream: String,
     pub shortcut: String,
     /// 截图翻译快捷键（默认 alt+s；多显示器下跟随光标所在屏）。
     pub ocr_shortcut: String,
@@ -374,6 +380,16 @@ pub async fn get_app_settings(
             target_language: Language::parse(&pipeline::read_target_language_code(&database)),
             swap_language: pipeline::read_setting(&database, pipeline::SETTINGS_SWAP_LANGUAGE)
                 .unwrap_or_else(|| pipeline::DEFAULT_SWAP_LANGUAGE.to_string()),
+            prompt_translate_system: pipeline::read_setting(
+                &database,
+                pipeline::SETTINGS_PROMPT_TRANSLATE_SYSTEM,
+            )
+            .unwrap_or_default(),
+            prompt_translate_stream: pipeline::read_setting(
+                &database,
+                pipeline::SETTINGS_PROMPT_TRANSLATE_STREAM,
+            )
+            .unwrap_or_default(),
             shortcut: pipeline::read_shortcut(&database),
             ocr_shortcut: pipeline::read_ocr_shortcut(&database),
             ui_theme: pipeline::read_ui_theme(&database),
@@ -447,6 +463,14 @@ pub async fn save_app_settings(
         database.set_setting(
             pipeline::SETTINGS_SWAP_LANGUAGE,
             &serde_json::json!(settings.swap_language.trim()),
+        )?;
+        database.set_setting(
+            pipeline::SETTINGS_PROMPT_TRANSLATE_SYSTEM,
+            &serde_json::json!(settings.prompt_translate_system.trim()),
+        )?;
+        database.set_setting(
+            pipeline::SETTINGS_PROMPT_TRANSLATE_STREAM,
+            &serde_json::json!(settings.prompt_translate_stream.trim()),
         )?;
         database.set_setting(
             crate::ocr::SETTINGS_OCR_PROVIDER,

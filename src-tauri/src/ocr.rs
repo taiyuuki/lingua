@@ -395,7 +395,8 @@ async fn translate_and_show(
     ));
     let engine = TranslationEngine::new(ai_provider)
         .with_dictionary(Some(dictionary))
-        .with_swap_language(pipeline::swap_language(database));
+        .with_swap_language(pipeline::swap_language(database))
+        .with_prompt_override(pipeline::prompt_override(database));
     let target_language = pipeline::target_language(database)?;
     let request = lingua_core::translation::TranslationRequest::new(
         source_text.clone(),

@@ -8,6 +8,6 @@ pub mod engine;
 pub mod study;
 pub mod template;
 
-pub use engine::TranslationEngine;
+pub use engine::{PromptOverride, TranslationEngine};
 pub use study::{StudyAnalysis, StudyAnalyzer, StudyRequest};
 pub use template::PromptTemplate;

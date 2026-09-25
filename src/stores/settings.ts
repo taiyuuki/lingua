@@ -60,6 +60,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const targetLanguage = ref("zh");
   /** 同语言换向目标："" = 关闭（划到目标语言文本照翻/照搬）。 */
   const swapLanguage = ref("en");
+  /** 自定义翻译 system prompt："" = 用内置模板。 */
+  const promptTranslateSystem = ref("");
+  const promptTranslateStream = ref("");
   const shortcut = ref("alt+t");
   const ocrShortcut = ref("alt+s");
   const uiTheme = ref("dark");
@@ -78,6 +81,8 @@ export const useSettingsStore = defineStore("settings", () => {
       studyProviderId.value = settings.studyProviderId ?? "";
       targetLanguage.value = settings.targetLanguage;
       swapLanguage.value = settings.swapLanguage ?? "en";
+      promptTranslateSystem.value = settings.promptTranslateSystem ?? "";
+      promptTranslateStream.value = settings.promptTranslateStream ?? "";
       shortcut.value = settings.shortcut;
       ocrShortcut.value = settings.ocrShortcut;
       uiTheme.value = normalizeTheme(settings.uiTheme);
@@ -109,6 +114,8 @@ export const useSettingsStore = defineStore("settings", () => {
         studyProviderId: studyProviderId.value === "" ? null : studyProviderId.value,
         targetLanguage: targetLanguage.value,
         swapLanguage: swapLanguage.value.trim(),
+        promptTranslateSystem: promptTranslateSystem.value.trim(),
+        promptTranslateStream: promptTranslateStream.value.trim(),
         shortcut: shortcut.value.trim() || "alt+t",
         ocrShortcut: ocrShortcut.value.trim() || "alt+s",
         uiTheme: uiTheme.value,
@@ -141,6 +148,8 @@ export const useSettingsStore = defineStore("settings", () => {
     studyProviderId,
     targetLanguage,
     swapLanguage,
+    promptTranslateSystem,
+    promptTranslateStream,
     shortcut,
     ocrShortcut,
     uiTheme,

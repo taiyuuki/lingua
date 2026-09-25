@@ -29,6 +29,9 @@ pub const SETTINGS_TARGET_LANGUAGE: &str = "translation.target_language";
 /// 同语言换向目标（划到的文本已是目标语言时改译成该语言；
 /// 空串 = 关闭）。默认 en：目标 zh 的用户划到中文文本改译英文。
 pub const SETTINGS_SWAP_LANGUAGE: &str = "translation.swap_language";
+/// 自定义翻译 system prompt（JSON 路径 / 流式路径）；空串 = 用内置。
+pub const SETTINGS_PROMPT_TRANSLATE_SYSTEM: &str = "prompt.translate_system";
+pub const SETTINGS_PROMPT_TRANSLATE_STREAM: &str = "prompt.translate_stream";
 pub const SETTINGS_SHORTCUT: &str = "shortcut.translate";
 pub const SETTINGS_SHORTCUT_OCR: &str = "shortcut.ocr";
 /// 查词自动记入生词本（默认关；Popup 的 ★ 手动收藏不受影响）。
@@ -92,7 +95,8 @@ async fn run(app: &AppHandle) -> AppResult<()> {
         Arc::new(SqliteDictionaryProvider::new(state.database.clone()));
     let engine = TranslationEngine::new(provider)
         .with_dictionary(Some(dictionary))
-        .with_swap_language(swap_language(&state.database));
+        .with_swap_language(swap_language(&state.database))
+        .with_prompt_override(prompt_override(&state.database));
     let request = TranslationRequest::new(selected.text, target_language(&state.database)?);
     let app_for_delta = app.clone();
     let result = engine
@@ -316,6 +320,14 @@ pub fn swap_language(database: &Database) -> Option<Language> {
     } else {
         Some(Language::parse(&code))
     }
+}
+
+/// 自定义翻译 system prompt（空白归一为 None = 用内置）。
+pub fn prompt_override(database: &Database) -> lingua_translation::PromptOverride {
+    lingua_translation::PromptOverride::normalized(
+        Some(&read_setting(database, SETTINGS_PROMPT_TRANSLATE_SYSTEM).unwrap_or_default()),
+        Some(&read_setting(database, SETTINGS_PROMPT_TRANSLATE_STREAM).unwrap_or_default()),
+    )
 }
 
 #[cfg(test)]
