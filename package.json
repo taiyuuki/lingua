@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "icon": "node scripts/render_icon.mjs && tauri icon assets/icon-1024.png"
   },
   "dependencies": {

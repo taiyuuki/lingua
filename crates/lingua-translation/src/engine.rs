@@ -58,7 +58,13 @@ impl TranslationEngine {
         let (system, user) = self.render_prompt(request);
         let chat_request = ChatRequest::simple(system, user);
         let response = self.provider.chat(&chat_request).await?;
-        Ok(parse_ai_translation(request, response.content))
+        Ok(parse_ai_translation(
+            request,
+            response.content,
+            response
+                .model
+                .or_else(|| Some(self.provider.id().to_string())),
+        ))
     }
 
     /// 流式翻译：词典命中时一次性回调译文；AI 路径使用**纯文本输出**
@@ -81,7 +87,8 @@ impl TranslationEngine {
             self.user_prompt(request),
         );
         let mut accumulated = String::new();
-        self.provider
+        let response = self
+            .provider
             .chat_stream(&chat_request, &mut |delta: String| {
                 // Provider 契约：回调参数是到目前为止的完整文本。
                 accumulated = delta.clone();
@@ -100,6 +107,9 @@ impl TranslationEngine {
             alternatives: Vec::new(),
             explanation: None,
             dictionaries: Vec::new(),
+            model: response
+                .model
+                .or_else(|| Some(self.provider.id().to_string())),
         })
     }
 
@@ -180,6 +190,7 @@ impl TranslationEngine {
             alternatives,
             explanation: None,
             dictionaries: usable,
+            model: None,
         })
     }
 
@@ -229,6 +240,7 @@ impl TranslationEngine {
 pub(crate) fn parse_ai_translation(
     request: &TranslationRequest,
     content: String,
+    model: Option<String>,
 ) -> TranslationResult {
     let fallback = || TranslationResult {
         source_text: request.text.clone(),
@@ -237,6 +249,7 @@ pub(crate) fn parse_ai_translation(
         alternatives: Vec::new(),
         explanation: None,
         dictionaries: Vec::new(),
+        model: model.clone(),
     };
 
     let Some(json_start) = content.find('{') else {
@@ -291,6 +304,7 @@ pub(crate) fn parse_ai_translation(
         alternatives,
         explanation,
         dictionaries: Vec::new(),
+        model,
     }
 }
 

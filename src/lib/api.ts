@@ -34,6 +34,8 @@ export interface TranslationResult {
   explanation: string | null;
   /** 命中的词典词条（每本词典一条，按导入顺序，首页首选）；AI 结果为空。 */
   dictionaries: DictionaryEntryDto[];
+  /** 产生译文的模型名（仅 AI 结果；词典结果为 null，标题回退显示词典名）。 */
+  model: string | null;
 }
 
 /**

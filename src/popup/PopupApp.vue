@@ -65,7 +65,9 @@ let unlistenTheme: (() => void) | null = null;
 let unlistenDelta: (() => void) | null = null;
 
 const engineLabel = computed(() =>
-  state.value.status === "result" ? (activeEntry.value?.source ?? "AI 翻译") : "",
+  state.value.status === "result"
+    ? (activeEntry.value?.source ?? state.value.model ?? "AI 翻译")
+    : "",
 );
 const detectedLanguageLabel = computed(() =>
   state.value.status === "result" ? state.value.detectedLanguage : null,
@@ -213,6 +215,9 @@ onMounted(async () => {
   });
   const stop = await onPopupState((next) => {
     state.value = next;
+    // 新一次查询：清掉上次的词典词条（词典视图卸载时不会发
+    // active-change，不重置会让 AI 结果顶着急用旧词典名当标题）。
+    activeEntry.value = null;
     streamed.text = "";
     copiedSource.value = false;
     copiedTranslation.value = false;
@@ -225,6 +230,7 @@ onMounted(async () => {
   const snapshot = await latestPopupState();
   if (snapshot) {
     state.value = snapshot;
+    activeEntry.value = null;
   }
   // 追平：挂载期间可能已漏掉若干 delta 事件
   streamed.text = await latestStreamed();

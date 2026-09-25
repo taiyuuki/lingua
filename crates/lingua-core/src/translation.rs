@@ -109,6 +109,10 @@ pub struct TranslationResult {
     /// Popup 据此渲染词典视图并支持多词典切换；AI 结果为空。
     #[serde(default)]
     pub dictionaries: Vec<DictionaryEntry>,
+    /// 产生译文的模型名（仅 AI 路径；词典路径为 `None`）。
+    /// Popup 用它作结果来源标签；模型未上报时前端回退到 Provider id。
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[cfg(test)]
@@ -142,14 +146,15 @@ mod tests {
 
     #[test]
     fn result_serializes_camel_case() {
-        let result = TranslationResult {
-            source_text: "hello".into(),
-            translated_text: "你好".into(),
-            detected_language: Some(Language::En),
-            alternatives: vec!["您好".into()],
-            explanation: None,
-            dictionaries: Vec::new(),
-        };
+    let result = TranslationResult {
+        source_text: "hello".into(),
+        translated_text: "你好".into(),
+        detected_language: Some(Language::En),
+        alternatives: vec!["您好".into()],
+        explanation: None,
+        dictionaries: Vec::new(),
+        model: Some("test-model".into()),
+    };
         let json = serde_json::to_value(&result).unwrap();
         assert!(json.get("translatedText").is_some());
         assert!(json.get("detectedLanguage").is_some());
