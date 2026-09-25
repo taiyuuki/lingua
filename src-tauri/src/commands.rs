@@ -1028,6 +1028,42 @@ pub async fn vocabulary_batch_update(
     .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
+/// 复习评分（0=忘记 1=记得 2=简单）：打点 + SRS-lite 重排期。
+#[tauri::command]
+pub async fn grade_vocabulary_review(
+    state: tauri::State<'_, AppState>,
+    id: i64,
+    result: i64,
+) -> Result<bool, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.grade_review(id, result))
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 到期待复习条数。
+#[tauri::command]
+pub async fn due_vocabulary_count(state: tauri::State<'_, AppState>) -> Result<usize, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.due_vocabulary_count())
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 到期复习队列（最早到期优先）。
+#[tauri::command]
+pub async fn list_due_vocabulary(
+    state: tauri::State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<lingua_core::VocabularyItem>, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database.list_due_vocabulary(limit.unwrap_or(20))
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
 #[tauri::command]
 pub async fn vocabulary_tags(state: tauri::State<'_, AppState>) -> Result<Vec<String>, AppError> {
     let database = state.database.clone();

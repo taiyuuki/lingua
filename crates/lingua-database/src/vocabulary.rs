@@ -132,10 +132,11 @@ impl Database {
         conn.execute(
             "INSERT INTO vocabulary
                 (word, word_lower, language, translation, source, examples,
-                 lookup_count, last_seen_at)
+                 lookup_count, last_seen_at, due_at, interval_days)
              VALUES
                 (?1, ?2, ?3, ?4, ?5, ?6, ?7,
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 1)
              ON CONFLICT(word_lower, language) DO UPDATE SET
                 translation = COALESCE(excluded.translation, vocabulary.translation),
                 source = CASE WHEN excluded.source != '' THEN excluded.source
@@ -330,11 +331,42 @@ impl Database {
         Ok(updated)
     }
 
-    /// 复习打点：写 `vocabulary_reviews` + `review_count` 自增。
-    /// `result`：0=again 1=good 2=easy（SRS 数据字段，算法后续阶段）。
-    pub fn record_review(&self, id: i64, result: i64) -> AppResult<bool> {
+    /// 复习评分（SRS-lite）：写 `vocabulary_reviews` 打点 +
+    /// `review_count` 自增 + 重算到期时间/间隔/掌握度。
+    ///
+    /// `result`：0=again（忘记）1=good（记得）2=easy（简单）。
+    /// 间隔阶梯 `[1,2,4,7,15,30,60]` 天：忘记回 1 天并回到「新词」；
+    /// 记得升一级（学习中）；简单直接「已掌握」+ 30 天。
+    pub fn grade_review(&self, id: i64, result: i64) -> AppResult<bool> {
+        const LADDER: [i64; 7] = [1, 2, 4, 7, 15, 30, 60];
         let mut conn = self.lock_conn()?;
         let tx = conn.transaction().map_err(db_err)?;
+        let (current_interval, current_mastery): (i64, i64) = tx
+            .query_row(
+                "SELECT interval_days, mastery FROM vocabulary WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(db_err)?
+            .ok_or_else(|| {
+                lingua_core::AppError::Database("vocabulary item not found".to_string())
+            })?;
+
+        let (next_interval, next_mastery) = match result {
+            0 => (1, 0),
+            1 => {
+                let interval = LADDER
+                    .iter()
+                    .find(|&&days| days > current_interval)
+                    .copied()
+                    .unwrap_or(60);
+                // 已掌握的词温习保持已掌握，其余至少「学习中」。
+                (interval, current_mastery.max(1))
+            }
+            _ => (30, 2),
+        };
+
         tx.execute(
             "INSERT INTO vocabulary_reviews (vocab_id, result) VALUES (?1, ?2)",
             params![id, result],
@@ -342,14 +374,48 @@ impl Database {
         .map_err(db_err)?;
         let changed = tx
             .execute(
-                "UPDATE vocabulary SET review_count = review_count + 1,
-                    last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                "UPDATE vocabulary
+                 SET review_count = review_count + 1,
+                     last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                     interval_days = ?2,
+                     mastery = ?3,
+                     due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || ?2 || ' days')
                  WHERE id = ?1",
-                params![id],
+                params![id, next_interval, next_mastery],
             )
             .map_err(db_err)?;
         tx.commit().map_err(db_err)?;
         Ok(changed > 0)
+    }
+
+    /// 到期待复习条数（due_at 非空且 <= 现在）。
+    pub fn due_vocabulary_count(&self) -> AppResult<usize> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM vocabulary
+             WHERE due_at != '' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as usize)
+        .map_err(db_err)
+    }
+
+    /// 到期复习队列（最早到期优先），每次最多取 `limit` 条。
+    pub fn list_due_vocabulary(&self, limit: u32) -> AppResult<Vec<VocabularyItem>> {
+        let sql = format!(
+            "SELECT {ITEM_COLUMNS} FROM vocabulary
+             WHERE due_at != '' AND due_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             ORDER BY due_at ASC, id ASC LIMIT {limit}"
+        );
+        let conn = self.lock_conn()?;
+        let mut statement = conn.prepare(&sql).map_err(db_err)?;
+        let rows = statement
+            .query_map([], row_to_item)
+            .map_err(db_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(db_err)?;
+        Ok(rows)
     }
 
     /// 全部去重标签（筛选下拉用）。
@@ -487,14 +553,65 @@ mod tests {
     }
 
     #[test]
-    fn review_increments_count() {
+    fn review_grading_reschedules_and_counts() {
         let db = Database::open_in_memory().unwrap();
         db.migrate().unwrap();
         let id = db.upsert_vocabulary(&lookup("hello")).unwrap();
-        assert!(db.record_review(id, 1).unwrap());
-        assert!(db.record_review(id, 2).unwrap());
-        let items = db.list_vocabulary(&VocabularyFilter::default()).unwrap();
-        assert_eq!(items[0].review_count, 2);
+        // 新词入库即到期（interval=1）。
+        assert_eq!(db.due_vocabulary_count().unwrap(), 1);
+
+        // 记得：间隔 1→2，掌握度升为学习中，离开到期队列。
+        assert!(db.grade_review(id, 1).unwrap());
+        assert_eq!(db.due_vocabulary_count().unwrap(), 0);
+        let item = db.find_vocabulary("hello", Language::En).unwrap().unwrap();
+        assert_eq!(item.review_count, 1);
+        assert_eq!(item.mastery, Mastery::Learning);
+
+        // 直接把到期时间挪到现在，连续「记得」沿阶梯上升。
+        let conn = db.lock_conn().unwrap();
+        conn.execute(
+            "UPDATE vocabulary SET due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1",
+            params![id],
+        )
+        .unwrap();
+        drop(conn);
+        assert!(db.grade_review(id, 1).unwrap()); // 2→4
+        assert!(db.grade_review(id, 1).unwrap()); // 4→7（已到期与否不影响调度）
+
+        // 忘记：回 1 天、回到新词。
+        assert!(db.grade_review(id, 0).unwrap());
+        let item = db.find_vocabulary("hello", Language::En).unwrap().unwrap();
+        assert_eq!(item.mastery, Mastery::New);
+        // 简单：已掌握 + 30 天。
+        assert!(db.grade_review(id, 2).unwrap());
+        let item = db.find_vocabulary("hello", Language::En).unwrap().unwrap();
+        assert_eq!(item.mastery, Mastery::Mastered);
+        assert_eq!(item.review_count, 5);
+    }
+
+    #[test]
+    fn due_queue_orders_oldest_first() {
+        let db = Database::open_in_memory().unwrap();
+        db.migrate().unwrap();
+        let a = db.upsert_vocabulary(&lookup("alpha")).unwrap();
+        let b = db.upsert_vocabulary(&lookup("beta")).unwrap();
+        // 手工设不同的到期时间：alpha 更早。
+        let conn = db.lock_conn().unwrap();
+        conn.execute(
+            "UPDATE vocabulary SET due_at = '2020-01-01T00:00:00.000Z' WHERE id = ?1",
+            params![a],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE vocabulary SET due_at = '2021-01-01T00:00:00.000Z' WHERE id = ?1",
+            params![b],
+        )
+        .unwrap();
+        drop(conn);
+        let due = db.list_due_vocabulary(10).unwrap();
+        assert_eq!(due.len(), 2);
+        assert_eq!(due[0].word, "alpha");
+        assert_eq!(due[1].word, "beta");
     }
 
     #[test]

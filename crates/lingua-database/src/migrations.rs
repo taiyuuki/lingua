@@ -57,6 +57,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "definition_html",
         sql: include_str!("../migrations/0008_definition_html.sql"),
     },
+    Migration {
+        version: 9,
+        name: "vocabulary_srs",
+        sql: include_str!("../migrations/0009_vocabulary_srs.sql"),
+    },
 ];
 
 /// 当前代码支持的最高 schema 版本。

@@ -2,7 +2,10 @@ import { reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import {
   deleteVocabulary,
+  dueVocabularyCount,
   getVocabularyTags,
+  gradeVocabularyReview,
+  listDueVocabulary,
   listVocabulary,
   updateVocabulary,
   vocabularyBatchDelete,
@@ -19,6 +22,9 @@ export const MASTERY_OPTIONS: Array<{ value: Mastery; label: string }> = [
   { value: "learning", label: "学习中" },
   { value: "mastered", label: "已掌握" },
 ];
+
+/** 复习一次取的队列长度：做多少算多少，不清空不惩罚。 */
+export const REVIEW_QUEUE_SIZE = 20;
 
 /** 掌握度循环顺序（点击徽章一键切换）。 */
 const MASTERY_CYCLE: Record<Mastery, Mastery> = {
@@ -82,6 +88,7 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
       items.value = await listVocabulary(filterDto());
       tags.value = await getVocabularyTags();
       loaded.value = true;
+      await refreshDueCount();
     } catch (error) {
       loadError.value = describeError(error);
     }
@@ -156,6 +163,71 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
     }
   }
 
+  // ---- 复习（SRS-lite）----
+
+  const dueCount = ref(0);
+  /** 复习模式：null = 列表模式。 */
+  const reviewQueue = ref<VocabularyItemDto[]>([]);
+  const reviewIndex = ref(0);
+  const revealed = ref(false);
+  const reviewStats = reactive({ again: 0, good: 0, easy: 0 });
+
+  async function refreshDueCount(): Promise<void> {
+    try {
+      dueCount.value = await dueVocabularyCount();
+    } catch {
+      dueCount.value = 0;
+    }
+  }
+
+  /** 进入复习模式：取到期队列（最多 20）。 */
+  async function startReview(): Promise<void> {
+    try {
+      reviewQueue.value = await listDueVocabulary(REVIEW_QUEUE_SIZE);
+      reviewIndex.value = 0;
+      revealed.value = false;
+      reviewStats.again = 0;
+      reviewStats.good = 0;
+      reviewStats.easy = 0;
+    } catch (error) {
+      loadError.value = describeError(error);
+    }
+  }
+
+  function revealDefinition(): void {
+    revealed.value = true;
+  }
+
+  /** 评分并前进；队列走完后停在总结页（endReview 返回列表）。 */
+  async function grade(result: 0 | 1 | 2): Promise<void> {
+    const item = reviewQueue.value[reviewIndex.value];
+    if (!item) {
+      return;
+    }
+    if (result === 0) {
+      reviewStats.again += 1;
+    } else if (result === 1) {
+      reviewStats.good += 1;
+    } else {
+      reviewStats.easy += 1;
+    }
+    try {
+      await gradeVocabularyReview(item.id, result);
+    } catch (error) {
+      loadError.value = describeError(error);
+      return;
+    }
+    reviewIndex.value += 1;
+    revealed.value = false;
+  }
+
+  async function endReview(): Promise<void> {
+    reviewQueue.value = [];
+    reviewIndex.value = 0;
+    revealed.value = false;
+    await Promise.all([load(), refreshDueCount()]);
+  }
+
   return {
     items,
     total,
@@ -168,6 +240,11 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
     masteryCounts,
     MASTERY_OPTIONS,
     VOCABULARY_PAGE_SIZE,
+    dueCount,
+    reviewQueue,
+    reviewIndex,
+    revealed,
+    reviewStats,
     load,
     applyFilters,
     turnTo,
@@ -176,5 +253,10 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
     remove,
     batchRemove,
     batchUpdate,
+    refreshDueCount,
+    startReview,
+    revealDefinition,
+    grade,
+    endReview,
   };
 });

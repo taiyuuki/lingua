@@ -425,6 +425,24 @@ export async function vocabularyBatchUpdate(
   });
 }
 
+/** 复习评分（0=忘记 1=记得 2=简单）：打点 + SRS-lite 重排期。 */
+export async function gradeVocabularyReview(
+  id: number,
+  result: 0 | 1 | 2,
+): Promise<boolean> {
+  return invoke<boolean>("grade_vocabulary_review", { id, result });
+}
+
+/** 到期待复习条数。 */
+export async function dueVocabularyCount(): Promise<number> {
+  return invoke<number>("due_vocabulary_count");
+}
+
+/** 到期复习队列（最早到期优先）。 */
+export async function listDueVocabulary(limit: number): Promise<VocabularyItemDto[]> {
+  return invoke<VocabularyItemDto[]>("list_due_vocabulary", { limit });
+}
+
 export async function getVocabularyTags(): Promise<string[]> {
   return invoke<string[]>("vocabulary_tags");
 }
