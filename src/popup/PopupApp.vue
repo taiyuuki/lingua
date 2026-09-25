@@ -520,11 +520,7 @@ function onToolbarMouseDown(event: MouseEvent): void {
               <!-- eslint-disable vue/no-v-html -->
               <div
                 v-if="definition.html"
-                :class="['popup-dict-rich', {
-                  'popup-dict-rich-clamped':
-                    isLongDefinition(definition.definition)
-                    && !expandedDefinitions.has(index),
-                }]"
+                class="popup-dict-rich"
                 @click="onRichLinkClick($event)"
                 v-html="definition.html"
               />
@@ -544,7 +540,7 @@ function onToolbarMouseDown(event: MouseEvent): void {
                 {{ definition.definition }}
               </div>
               <span
-                v-if="isLongDefinition(definition.definition)"
+                v-if="!definition.html && isLongDefinition(definition.definition)"
                 class="popup-dict-toggle"
                 @click="onDefinitionToggle(index, definition.definition)"
               >

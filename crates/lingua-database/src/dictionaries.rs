@@ -195,7 +195,7 @@ impl Database {
     }
 
     /// 按词头查询（大小写不敏感），可按词头语言过滤。
-    /// 返回的 [`DictionaryEntry::source`] 填充为词典 id。
+    /// 返回的 [`DictionaryEntry::source`] 填充为词典名称（展示用）。
     pub fn lookup_entries(
         &self,
         lemma: &str,
@@ -209,7 +209,7 @@ impl Database {
 
         let mut sql = String::from(
             "SELECT e.id, e.lemma, e.language, e.pronunciations, e.inflections,
-                    d.gloss_lang, d.id
+                    d.gloss_lang, d.name
              FROM dictionary_entries e
              JOIN dictionaries d ON d.id = e.dictionary_id
              WHERE e.lemma_lower = ?1",
@@ -333,7 +333,8 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].lemma, "Hello");
         assert_eq!(results[0].definitions[0].definition, "你好");
-        assert_eq!(results[0].source, "my-dict");
+        // source 填词典名称（展示用）。
+        assert_eq!(results[0].source, "Dict my-dict");
 
         // 语言不匹配时查不到。
         assert!(
@@ -375,7 +376,7 @@ mod tests {
 
         let results = db.lookup_entries("cat", Some(Language::En)).unwrap();
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].source, "dict-a");
+        assert_eq!(results[0].source, "Dict dict-a");
         assert_eq!(results[1].definitions[0].definition, "猫科动物");
     }
 

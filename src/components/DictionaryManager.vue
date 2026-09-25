@@ -16,7 +16,6 @@ import {
   NProgress,
   NSelect,
   NSpace,
-  NTag,
   NText,
 } from "naive-ui";
 import {
@@ -58,12 +57,12 @@ const importPercentage = computed(() => {
   return Math.round((progress.imported / progress.total) * 100);
 });
 
-/** 文件选择框选词典文件，直接填进路径输入（仍可手改）。 */
+/** 文件选择框选词典文件：填路径，名称为空/仍是自动值时用文件名填入。 */
 async function browseDictionaryFile(): Promise<void> {
   try {
     const path = await pickDictionaryFilePath();
     if (path) {
-      form.value.path = path;
+      store.setPickedPath(path);
     }
   } catch {
     // 选择器不可用时静默：手输路径的旧路径仍然可用。
@@ -119,21 +118,9 @@ onMounted(() => {
       >
         <div class="row">
           <div class="row-main">
-            <n-space
-              :size="6"
-              align="center"
-              style="margin-bottom: 2px"
-            >
-              <n-text strong>
-                {{ dictionary.name }}
-              </n-text>
-              <n-tag
-                size="small"
-                :bordered="true"
-              >
-                {{ dictionary.id }}
-              </n-tag>
-            </n-space>
+            <n-text strong>
+              {{ dictionary.name }}
+            </n-text>
             <n-text
               depth="3"
               class="row-detail"
@@ -177,26 +164,12 @@ onMounted(() => {
         vertical
         :size="12"
       >
-        <n-space :size="12">
-          <n-form-item
-            label="ID（英文标识）"
-            style="flex: 1"
-          >
-            <n-input
-              v-model:value="form.id"
-              placeholder="my-en-zh"
-            />
-          </n-form-item>
-          <n-form-item
-            label="名称"
-            style="flex: 1"
-          >
-            <n-input
-              v-model:value="form.name"
-              placeholder="我的英汉词典"
-            />
-          </n-form-item>
-        </n-space>
+        <n-form-item label="名称">
+          <n-input
+            v-model:value="form.name"
+            placeholder="选文件后自动填入，可手动修改"
+          />
+        </n-form-item>
 
         <n-space :size="12">
           <n-form-item

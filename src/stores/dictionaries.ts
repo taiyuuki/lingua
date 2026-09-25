@@ -11,10 +11,9 @@ import {
 } from "../lib/api";
 import { describeError } from "../lib/errors";
 
-/** 词典导入表单。 */
+/** 词典导入表单。id 由后端按文件名自动生成，不再要求手填。 */
 export interface ImportForm {
   open: boolean;
-  id: string;
   name: string;
   sourceLanguage: string;
   glossLanguage: string;
@@ -40,12 +39,18 @@ export function isMdxPath(path: string): boolean {
 function emptyForm(): ImportForm {
   return {
     open: false,
-    id: "",
     name: "",
     sourceLanguage: "en",
     glossLanguage: "zh",
     path: "",
   };
+}
+
+/** 从路径取文件名（去扩展名）；取不到返回空串。 */
+export function fileNameStem(path: string): string {
+  const name = path.split(/[\\/]/).pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
 }
 
 /** 词典管理域状态：列表 + 导入表单。 */
@@ -85,6 +90,19 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     form.open = false;
   }
 
+  /** 上次自动填入的名称：换选文件时仅当名称仍是自动值才覆盖，
+   *  用户手改过的名称不被文件选择冲掉。 */
+  let autoFilledName = "";
+
+  /** 选定词典文件后填路径；名称为空或仍是自动值时用文件名填入。 */
+  function setPickedPath(path: string): void {
+    form.path = path;
+    if (!form.name || form.name === autoFilledName) {
+      autoFilledName = fileNameStem(path);
+      form.name = autoFilledName;
+    }
+  }
+
   /** 导入词典：.mdx 走 MDX 命令（带进度事件），其余按 TSV。 */
   async function importDictionary(): Promise<void> {
     importing.value = true;
@@ -97,8 +115,9 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     });
     try {
       const request = {
-        id: form.id.trim(),
-        name: form.name.trim() || form.id.trim(),
+        // id 留空：后端按文件名自动生成（同文件重导 → 覆盖更新）。
+        id: "",
+        name: form.name.trim(),
         sourceLanguage: form.sourceLanguage,
         glossLanguage: form.glossLanguage,
         path: form.path.trim(),
@@ -148,6 +167,7 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     load,
     openImport,
     closeForm,
+    setPickedPath,
     importDictionary,
     remove,
   };

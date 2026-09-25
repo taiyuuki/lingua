@@ -1335,11 +1335,12 @@ mod tests {
             .collect();
         assert_eq!(database.import_dictionary(&meta, &entries).unwrap(), 3);
 
-        // 大小写不敏感命中，别名保留在词形变化里，富文本 HTML 随行。
+        // 大小写不敏感命中，别名保留在词形变化里，富文本 HTML 随行；
+        // source 填词典名称（展示用）。
         let hits = database.lookup_entries("WORLD", Some(Language::En)).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].lemma, "world");
-        assert_eq!(hits[0].source, "test-mdx");
+        assert_eq!(hits[0].source, "Test MDX");
         assert_eq!(hits[0].inflections, vec!["world2"]);
         let html = hits[0].definitions[0].html.as_deref().unwrap();
         assert!(html.contains("<p>world &amp; <font"), "{html}");

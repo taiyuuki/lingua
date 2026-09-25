@@ -718,18 +718,7 @@ body {
   overflow: hidden;
 }
 
-/* 长释义折叠态（富文本）：不用 -webkit-line-clamp——它要求
-   legacy 的 display:-webkit-box，对嵌套 span + 词典 CSS 的复杂
-   行内内容行盒计算不可靠（文字重叠），改用限高 + 底部渐隐。 */
-.popup-dict-rich-clamped {
-  max-height: 9.2em;
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent);
-  mask-image: linear-gradient(to bottom, #000 78%, transparent);
-}
-
-/* 展开态无固定上限：释义列表自适应撑满弹窗剩余空间、内部滚动
-   （见 .popup-dict-definitions）。 */
+/* 富文本释义不折叠：完整渲染，由释义列表内部滚动（纯文本保留折叠） */
 
 .popup-dict-toggle {
   display: inline-block;

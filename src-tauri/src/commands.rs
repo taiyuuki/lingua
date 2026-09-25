@@ -516,12 +516,79 @@ pub async fn list_dictionaries(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportDictionaryRequest {
+    /// 词典 id。留空则按文件名自动生成（导入表单已不再要求手填）。
     pub id: String,
     pub name: String,
     pub source_language: Language,
     pub gloss_language: Language,
     /// 词典 TSV 文件的绝对路径（Phase 3 用路径输入，文件选择器后续接入）。
     pub path: String,
+}
+
+/// FNV-1a 64 位（稳定哈希：跨版本/跨平台生成同样的词典 id）。
+fn fnv1a(text: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// 从文件名自动生成词典 id：小写 slug + 文件名短哈希后缀。
+/// 同名文件重导 → 同 id（覆盖更新）；不同文件基本不撞。
+fn generate_dictionary_id(path: &str) -> String {
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("dict");
+    let slug = stem
+        .chars()
+        .filter_map(|c| match c {
+            'a'..='z' | '0'..='9' => Some(c),
+            'A'..='Z' => Some(c.to_ascii_lowercase()),
+            ' ' | '_' | '-' | '.' => Some('-'),
+            _ => None,
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let base: String = if slug.len() >= 3 {
+        slug.chars().take(24).collect()
+    } else {
+        // 纯中文等无法 slug 化的文件名。
+        "dict".to_string()
+    };
+    format!("{base}-{:06x}", fnv1a(stem) & 0x00ff_ffff)
+}
+
+/// 导入 id 裁决：显式填写优先，留空按文件名生成；返回 (id, name)，
+/// name 为空时同样回退文件名 stem。
+fn resolve_dictionary_identity(request: &ImportDictionaryRequest) -> (String, String) {
+    let stem = std::path::Path::new(&request.path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let id = {
+        let trimmed = request.id.trim();
+        if trimmed.is_empty() {
+            generate_dictionary_id(&request.path)
+        } else {
+            trimmed.to_string()
+        }
+    };
+    let name = {
+        let trimmed = request.name.trim();
+        if trimmed.is_empty() {
+            stem.clone()
+        } else {
+            trimmed.to_string()
+        }
+    };
+    (id, name)
 }
 
 #[derive(Debug, Serialize)]
@@ -542,12 +609,8 @@ pub async fn import_dictionary_tsv(
 ) -> Result<ImportDictionaryResult, AppError> {
     let database = state.database.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let id = request.id.trim().to_string();
-        if id.is_empty() {
-            return Err(AppError::InvalidInput(
-                "dictionary id is required".to_string(),
-            ));
-        }
+        // id 留空按文件名生成；name 留空回退文件名 stem。
+        let (id, name) = resolve_dictionary_identity(&request);
         let text = std::fs::read_to_string(&request.path).map_err(|error| {
             AppError::InvalidInput(format!("cannot read `{}`: {error}", request.path))
         })?;
@@ -565,7 +628,7 @@ pub async fn import_dictionary_tsv(
         }
         let meta = DictionaryMeta {
             id,
-            name: request.name.trim().to_string(),
+            name,
             source_language: request.source_language,
             gloss_language: request.gloss_language,
         };
@@ -612,12 +675,8 @@ pub async fn import_dictionary_mdx(
 ) -> Result<ImportDictionaryResult, AppError> {
     let database = state.database.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let id = request.id.trim().to_string();
-        if id.is_empty() {
-            return Err(AppError::InvalidInput(
-                "dictionary id is required".to_string(),
-            ));
-        }
+        // id 留空按文件名生成；name 留空回退文件名 stem。
+        let (id, name) = resolve_dictionary_identity(&request);
         let emit_progress = |phase: &'static str, imported: usize, total: usize| {
             let _ = app.emit(
                 "dictionary://import-progress",
@@ -663,7 +722,7 @@ pub async fn import_dictionary_mdx(
         }
         let meta = DictionaryMeta {
             id: id.clone(),
-            name: request.name.trim().to_string(),
+            name,
             source_language: request.source_language.clone(),
             gloss_language: request.gloss_language.clone(),
         };
@@ -1067,4 +1126,38 @@ pub async fn set_autostart(
         let _ = item.set_checked(enabled);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    #[test]
+    fn generated_ids_are_slugged_and_stable() {
+        let a = generate_dictionary_id(r"C:\dicts\Oxford Advanced.mdx");
+        let b = generate_dictionary_id(r"D:\other\Oxford Advanced.mdx");
+        assert!(a.starts_with("oxford-advanced-"), "{a}");
+        assert_eq!(a, b, "同名文件 → 同 id（重导覆盖更新）");
+        // 纯中文文件名 slug 化为空，回退 dict- 前缀。
+        let cjk = generate_dictionary_id(r"C:\词库\牛津高阶.mdx");
+        assert!(cjk.starts_with("dict-"), "{cjk}");
+        let tsv = generate_dictionary_id("my_words.tsv");
+        assert!(tsv.starts_with("my-words-"), "{tsv}");
+    }
+
+    #[test]
+    fn identity_falls_back_to_filename() {
+        let request = ImportDictionaryRequest {
+            id: "".into(),
+            name: "".into(),
+            source_language: Language::En,
+            gloss_language: Language::Zh,
+            path: r"C:\d\My Dict.mdx".into(),
+        };
+        let (id, name) = resolve_dictionary_identity(&request);
+        assert!(id.starts_with("my-dict-"), "{id}");
+        assert_eq!(name, "My Dict");
+    }
 }
