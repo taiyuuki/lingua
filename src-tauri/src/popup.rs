@@ -8,13 +8,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
 
 /// 与前端 popup 样式约定一致的窗口尺寸（逻辑像素）。
-pub const POPUP_WIDTH: f64 = 420.0;
-pub const POPUP_HEIGHT: f64 = 360.0;
+pub const POPUP_WIDTH: f64 = 560.0;
+pub const POPUP_HEIGHT: f64 = 480.0;
 /// Popup 事件通道（前端 `listen("popup://state")`）。
 pub const POPUP_EVENT: &str = "popup://state";
 
-/// 置顶状态（工具栏图钉可切换；窗口默认置顶）。
-static POPUP_PINNED: AtomicBool = AtomicBool::new(true);
+/// 图钉固定状态（工具栏图钉可切换）：固定时点击外部不隐藏，
+/// Esc / 重新翻译仍然生效。窗口本身始终置顶，与图钉解耦。
+static POPUP_PINNED: AtomicBool = AtomicBool::new(false);
 
 pub fn popup_pinned() -> bool {
     POPUP_PINNED.load(Ordering::Relaxed)
@@ -67,6 +68,10 @@ fn focus_inside_own_window_tree(_window: &tauri::Window) -> bool {
 /// * 焦点仍在 popup 窗口树内 → 不隐藏；但父窗口不会再次收到
 ///   失焦事件，改由 watcher 轮询盯到真正失焦再隐藏。
 pub fn handle_focus_lost(window: &tauri::Window) {
+    // 图钉固定：点击外部不隐藏（Esc / 重新翻译仍生效）。
+    if popup_pinned() {
+        return;
+    }
     if focus_inside_own_window_tree(window) {
         arm_focus_watcher(window.clone());
     } else {
@@ -75,6 +80,7 @@ pub fn handle_focus_lost(window: &tauri::Window) {
 }
 
 /// 每 150ms 检查前台是否已离开 popup 窗口树；popup 隐藏后自动退出。
+/// 监视期间图钉被点亮则直接退出（不隐藏）。
 fn arm_focus_watcher(window: tauri::Window) {
     if FOCUS_WATCHING.swap(true, Ordering::AcqRel) {
         return;
@@ -83,7 +89,7 @@ fn arm_focus_watcher(window: tauri::Window) {
         tracing::debug!("popup focus watcher armed");
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-            if !window.is_visible().unwrap_or(false) {
+            if !window.is_visible().unwrap_or(false) || popup_pinned() {
                 break;
             }
             if !focus_inside_own_window_tree(&window) {
@@ -111,7 +117,7 @@ pub fn ensure_window(app: &AppHandle) -> AppResult<WebviewWindow> {
     .transparent(true) // 圆角：页面根节点 border-radius 裁剪（需 macOSPrivateApi）
     .always_on_top(true)
     .skip_taskbar(true)
-    .resizable(false)
+    .resizable(true) // 可临时调节；每次重新弹出时重置为默认尺寸
     .visible(false) // 定位后再显示，避免闪现在默认位置
     .build()
     .map_err(platform_error)
@@ -188,11 +194,17 @@ pub async fn show(app: &AppHandle, state: PopupState) -> AppResult<()> {
     }
 
     let window = ensure_window(app)?;
-    // 每次新的翻译触发（Loading 态）或从隐藏恢复时定位；
+    // 每次新的翻译触发（Loading 态）或从隐藏恢复时重置并定位：
+    // 用户拖出的尺寸不持久化，恢复默认后按默认尺寸重新居中；
     // Loading → Result 的原地刷新不重定位，避免翻译完成时跳位。
     // 多显示器下重复触发会让弹窗跟随光标所在的屏幕。
     let already_visible = window.is_visible().map_err(platform_error)?;
     if !already_visible || matches!(state, PopupState::Loading { .. }) {
+        if let Err(error) =
+            window.set_size(tauri::LogicalSize::new(POPUP_WIDTH, POPUP_HEIGHT))
+        {
+            tracing::warn!(error = %error, "failed to reset popup size");
+        }
         position_popup(app, &window);
     }
     app.emit(POPUP_EVENT, &state).map_err(platform_error)?;

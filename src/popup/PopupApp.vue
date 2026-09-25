@@ -30,7 +30,8 @@ const state = ref<PopupState>({ status: "loading", sourceText: null });
 const streamed = reactive({ text: "" });
 const copiedSource = ref(false);
 const copiedTranslation = ref(false);
-const pinned = ref(true);
+// 图钉 = 点击外部不隐藏（置顶常开，与图钉无关）；默认不固定。
+const pinned = ref(false);
 // 收藏：仅单词可收藏；星标是双向开关（在生词本中 ⇄ 移除）。
 const starVisible = ref(false);
 const saved = ref(false);
@@ -294,7 +295,7 @@ function onToolbarMouseDown(event: MouseEvent): void {
         class="tool-btn"
         :class="{ 'tool-active': pinned }"
         type="button"
-        title="置顶"
+        title="固定：点击外部不隐藏"
         @click="togglePin"
       >
         <svg

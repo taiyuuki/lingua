@@ -712,9 +712,9 @@ body {
   mask-image: linear-gradient(to bottom, #000 78%, transparent);
 }
 
-/* 展开态：弹窗 360px 高内的滚动上限 */
+/* 展开态：弹窗内的滚动上限（弹窗默认 560x480，可临时拖大） */
 .popup-dict-expanded {
-  max-height: 11em;
+  max-height: 17em;
   overflow-y: auto;
 }
 

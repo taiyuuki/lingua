@@ -468,10 +468,9 @@ pub async fn latest_streamed() -> Result<String, AppError> {
 
 /// 切换 Popup 置顶（工具栏图钉），返回切换后的状态。
 #[tauri::command]
-pub async fn toggle_popup_pin(app: tauri::AppHandle) -> Result<bool, AppError> {
-    let window = crate::popup::ensure_window(&app)?;
+pub async fn toggle_popup_pin(_app: tauri::AppHandle) -> Result<bool, AppError> {
+    // 图钉 = 点击外部不隐藏；窗口置顶始终开启（不再随图钉切换）。
     let next = !crate::popup::popup_pinned();
-    window.set_always_on_top(next).map_err(platform_error)?;
     crate::popup::set_popup_pinned(next);
     Ok(next)
 }
