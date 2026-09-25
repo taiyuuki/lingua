@@ -167,6 +167,30 @@ export interface SaveVocabularyRequestDto {
   examples: string[];
 }
 
+/** 历史条目来源：划词 / 截图 OCR。 */
+export type HistoryKind = "selection" | "ocr";
+
+/** 与 Rust `HistoryItem` 对应（camelCase）。 */
+export interface HistoryItemDto {
+  id: number;
+  sourceText: string;
+  translatedText: string;
+  detectedLanguage: string | null;
+  targetLanguage: string;
+  /** AI 模型/Provider 标签；词典命中为 null。 */
+  model: string | null;
+  kind: HistoryKind;
+  dictionaryHit: boolean;
+  createdAt: string;
+}
+
+export interface HistoryFilterDto {
+  search: string | null;
+  kind: HistoryKind | null;
+  limit: number;
+  offset: number;
+}
+
 export async function getAppInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_info");
 }
@@ -470,6 +494,26 @@ export async function getVocabularyTags(): Promise<string[]> {
 
 export async function saveToVocabulary(request: SaveVocabularyRequestDto): Promise<void> {
   await invoke("save_to_vocabulary", { request });
+}
+
+/** 历史列表（最近在前）。 */
+export async function listHistory(filter: HistoryFilterDto): Promise<HistoryItemDto[]> {
+  return invoke<HistoryItemDto[]>("list_history", { filter });
+}
+
+/** 与筛选条件匹配的历史条数（分页用）。 */
+export async function historyCount(filter: HistoryFilterDto): Promise<number> {
+  return invoke<number>("history_count", { filter });
+}
+
+/** 删除单条历史，返回是否存在。 */
+export async function deleteHistory(id: number): Promise<boolean> {
+  return invoke<boolean>("delete_history", { id });
+}
+
+/** 清空全部历史，返回删除条数。 */
+export async function clearHistory(): Promise<number> {
+  return invoke<number>("clear_history");
 }
 
 export async function openPopup(): Promise<void> {

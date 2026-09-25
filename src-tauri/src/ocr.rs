@@ -394,9 +394,10 @@ async fn translate_and_show(
         database.clone(),
     ));
     let engine = TranslationEngine::new(ai_provider).with_dictionary(Some(dictionary));
+    let target_language = pipeline::target_language(database)?;
     let request = lingua_core::translation::TranslationRequest::new(
         source_text.clone(),
-        pipeline::target_language(database)?,
+        target_language.clone(),
     );
     let app_for_delta = app.clone();
     let mut result = engine
@@ -412,7 +413,13 @@ async fn translate_and_show(
         result.detected_language = language_hint.as_deref().map(lingua_core::Language::parse);
     }
 
+    let history_record = pipeline::history_record_from_result(
+        &result,
+        target_language,
+        lingua_core::HistoryKind::Ocr,
+    );
     popup::show(app, PopupState::Result(Box::new(result))).await?;
+    pipeline::record_history_task(database.clone(), history_record).await;
     Ok(())
 }
 

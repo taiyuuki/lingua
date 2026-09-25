@@ -32,6 +32,7 @@ const menu = [
   { path: "/providers", label: "服务", icon: "M7 18a4 4 0 1 1 .6-7.9A5.5 5.5 0 0 1 18 9.5a3.5 3.5 0 0 1 0 7H7z" },
   { path: "/dictionary", label: "词典", icon: "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zm0 14a2 2 0 0 1 2-2h13" },
   { path: "/vocabulary", label: "生词本", icon: "M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.4l6.1-.8z" },
+  { path: "/history", label: "历史", icon: "M12 8v5l3 3M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z" },
   { path: "/settings", label: "设置", icon: "M4 7h16M4 12h16M4 17h16" },
 ];
 

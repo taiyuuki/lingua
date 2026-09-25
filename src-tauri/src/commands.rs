@@ -375,11 +375,8 @@ pub async fn get_app_settings(
             .unwrap_or_else(|| crate::ocr::DEFAULT_OCR_TESSERACT_PATH.to_string()),
             ocr_http_url: pipeline::read_setting(&database, crate::ocr::SETTINGS_OCR_HTTP_URL)
                 .unwrap_or_else(|| lingua_ocr::OCR_HTTP_DEFAULT_URL.to_string()),
-            auto_vocabulary: pipeline::read_setting(
-                &database,
-                pipeline::SETTINGS_AUTO_VOCABULARY,
-            )
-            .as_deref()
+            auto_vocabulary: pipeline::read_setting(&database, pipeline::SETTINGS_AUTO_VOCABULARY)
+                .as_deref()
                 == Some("true"),
         })
     })
@@ -450,7 +447,11 @@ pub async fn save_app_settings(
         )?;
         database.set_setting(
             pipeline::SETTINGS_AUTO_VOCABULARY,
-            &serde_json::json!(if settings.auto_vocabulary { "true" } else { "false" }),
+            &serde_json::json!(if settings.auto_vocabulary {
+                "true"
+            } else {
+                "false"
+            }),
         )?;
         Ok(())
     })
@@ -619,8 +620,7 @@ pub struct ImportDictionaryResult {
 
 /// 导入取消标志：`cancel_dictionary_import` 置位，导入循环在批边界
 /// 检查并停止（5000 条一批，粒度在秒级内）。
-static IMPORT_CANCELLED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static IMPORT_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 取消正在进行的词典导入。
 #[tauri::command]
@@ -695,8 +695,8 @@ const MDX_IMPORT_BATCH: usize = 5000;
 /// 散装资源扩展名：与 .mdx 同目录平铺的样式/字体/图标
 /// （OALD10 的 OALD8C.css 布局：css 不在 .mdd 里而是和 mdx 并排）。
 const LOOSE_RESOURCE_EXTENSIONS: [&str; 14] = [
-    "css", "js", "png", "gif", "jpg", "jpeg", "svg", "webp", "bmp", "ico", "woff", "woff2",
-    "ttf", "otf",
+    "css", "js", "png", "gif", "jpg", "jpeg", "svg", "webp", "bmp", "ico", "woff", "woff2", "ttf",
+    "otf",
 ];
 
 /// 把 .mdx 同目录的散装资源文件复制进词典资源目录（根层）。
@@ -716,8 +716,7 @@ fn copy_loose_resources(mdx_path: &std::path::Path, resource_dir: &std::path::Pa
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .is_some_and(|ext| {
-                    LOOSE_RESOURCE_EXTENSIONS
-                        .contains(&ext.to_ascii_lowercase().as_str())
+                    LOOSE_RESOURCE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
                 });
         if !is_resource {
             continue;
@@ -790,9 +789,7 @@ fn alias_missing_css(resource_dir: &std::path::Path, htmls: &[&str]) {
             let after = &rest[at + prefix.len()..];
             if let Some(slash) = after.find('/') {
                 let path = &after[slash + 1..];
-                let end = path
-                    .find(['"', ' ', '?'])
-                    .unwrap_or(path.len());
+                let end = path.find(['"', ' ', '?']).unwrap_or(path.len());
                 let path = &path[..end];
                 if path.to_ascii_lowercase().ends_with(".css") && !path.contains("..") {
                     referenced.insert(path.to_string());
@@ -1047,7 +1044,9 @@ pub async fn dictionary_lookup(
     let database = state.database.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let entries = database.lookup_entries(&word, language)?;
-        Ok(entries.into_iter().find(lingua_core::DictionaryEntry::has_definitions))
+        Ok(entries
+            .into_iter()
+            .find(lingua_core::DictionaryEntry::has_definitions))
     })
     .await
     .map_err(|error| AppError::Internal(error.to_string()))?
@@ -1251,11 +1250,9 @@ pub async fn list_due_vocabulary(
     limit: Option<u32>,
 ) -> Result<Vec<lingua_core::VocabularyItem>, AppError> {
     let database = state.database.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        database.list_due_vocabulary(limit.unwrap_or(20))
-    })
-    .await
-    .map_err(|error| AppError::Internal(error.to_string()))?
+    tauri::async_runtime::spawn_blocking(move || database.list_due_vocabulary(limit.unwrap_or(20)))
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
 /// 按语言分组计数（生词本分组筛选用）。
@@ -1357,6 +1354,73 @@ pub async fn save_to_vocabulary(
     })
     .await
     .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+// ---------- 翻译历史（Phase 8） ----------
+
+/// 历史列表筛选（search 匹配原文/译文；kind 区分划词/截图入口）。
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HistoryFilterDto {
+    pub search: Option<String>,
+    pub kind: Option<lingua_core::HistoryKind>,
+    pub limit: u32,
+    pub offset: u32,
+}
+
+fn history_filter_from(dto: HistoryFilterDto) -> lingua_database::HistoryFilter {
+    lingua_database::HistoryFilter {
+        search: dto.search,
+        kind: dto.kind,
+        limit: dto.limit,
+        offset: dto.offset,
+    }
+}
+
+#[tauri::command]
+pub async fn list_history(
+    state: tauri::State<'_, AppState>,
+    filter: Option<HistoryFilterDto>,
+) -> Result<Vec<lingua_core::HistoryItem>, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let filter = history_filter_from(filter.unwrap_or_default());
+        database.list_history(&filter)
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 与筛选条件匹配的历史条数（分页用）。
+#[tauri::command]
+pub async fn history_count(
+    state: tauri::State<'_, AppState>,
+    filter: Option<HistoryFilterDto>,
+) -> Result<usize, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let filter = history_filter_from(filter.unwrap_or_default());
+        database.count_history(&filter)
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+#[tauri::command]
+pub async fn delete_history(state: tauri::State<'_, AppState>, id: i64) -> Result<bool, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.delete_history(id))
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 清空全部历史。返回删除条数。
+#[tauri::command]
+pub async fn clear_history(state: tauri::State<'_, AppState>) -> Result<usize, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.clear_history())
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
 // ---------- OCR 截图翻译（Phase 5） ----------

@@ -8,12 +8,14 @@
 //! * 业务数据不允许散落在 JSON 文件里；settings 表是唯一的 KV 例外。
 
 pub mod dictionaries;
+pub mod history;
 pub mod migrations;
 pub mod providers;
 pub mod settings;
 pub mod vocabulary;
 
 pub use dictionaries::{DictionaryInfo, DictionaryMeta};
+pub use history::{HISTORY_RETENTION, HistoryFilter};
 pub use migrations::{MIGRATIONS, Migration, latest_version};
 pub use vocabulary::{VocabularyFilter, VocabularyUpsert};
 

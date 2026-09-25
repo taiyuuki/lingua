@@ -9,6 +9,7 @@
 
 pub mod dictionary;
 pub mod error;
+pub mod history;
 pub mod language;
 pub mod lemma;
 pub mod ocr;
@@ -18,6 +19,7 @@ pub mod vocabulary;
 
 pub use dictionary::{DictionaryDefinition, DictionaryEntry};
 pub use error::{AppError, AppResult};
+pub use history::{HistoryItem, HistoryKind, HistoryRecord};
 pub use language::Language;
 pub use ocr::{OcrBlock, OcrImage, OcrLine, OcrResult, base64_encode};
 pub use selection::{Rect, SelectedText, SelectionSource};

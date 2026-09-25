@@ -30,8 +30,8 @@ pub struct TrayState {
     pub autostart_item: std::sync::Mutex<CheckMenuItem<tauri::Wry>>,
 }
 
-    pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-        tauri::Builder::default()
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    tauri::Builder::default()
         .register_uri_scheme_protocol("mdx-res", handle_mdx_resource)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -128,6 +128,10 @@ pub struct TrayState {
             commands::is_word,
             commands::vocabulary_word_status,
             commands::remove_vocabulary_word,
+            commands::list_history,
+            commands::history_count,
+            commands::delete_history,
+            commands::clear_history,
             commands::start_ocr_capture,
             commands::get_ocr_background,
             commands::perform_ocr_translation,

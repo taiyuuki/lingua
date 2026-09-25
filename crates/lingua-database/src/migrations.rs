@@ -67,6 +67,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "dictionaries_sort_order",
         sql: include_str!("../migrations/0010_dictionaries_sort_order.sql"),
     },
+    Migration {
+        version: 11,
+        name: "translation_history",
+        sql: include_str!("../migrations/0011_translation_history.sql"),
+    },
 ];
 
 /// 当前代码支持的最高 schema 版本。

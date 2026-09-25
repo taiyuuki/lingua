@@ -8,8 +8,8 @@
 use crate::popup;
 use crate::state::{AppState, PopupState};
 use lingua_ai::{AIRouter, AiTask, OpenAiCompatibleProvider};
-use lingua_core::translation::{TextKind, TranslationRequest, classify_text};
-use lingua_core::{AppResult, Language};
+use lingua_core::translation::{TextKind, TranslationRequest, TranslationResult, classify_text};
+use lingua_core::{AppResult, HistoryKind, HistoryRecord, Language};
 use lingua_database::Database;
 use lingua_database::VocabularyUpsert;
 use lingua_dictionary::SqliteDictionaryProvider;
@@ -100,9 +100,7 @@ async fn run(app: &AppHandle) -> AppResult<()> {
     //    来源/例句取首选词典（dictionaries[0]）。
     let auto_vocabulary =
         read_setting(&state.database, SETTINGS_AUTO_VOCABULARY).as_deref() == Some("true");
-    let vocabulary_record = if auto_vocabulary
-        && classify_text(&request.text) == TextKind::Word
-    {
+    let vocabulary_record = if auto_vocabulary && classify_text(&request.text) == TextKind::Word {
         Some(VocabularyUpsert {
             word: request.text.clone(),
             language: result
@@ -111,10 +109,10 @@ async fn run(app: &AppHandle) -> AppResult<()> {
                 .or_else(|| request.source_language.clone())
                 .unwrap_or_else(|| Language::parse("und")),
             translation: Some(result.translated_text.clone()),
-            source: result.dictionaries.first().map_or_else(
-                || "ai".to_string(),
-                |entry| entry.source.clone(),
-            ),
+            source: result
+                .dictionaries
+                .first()
+                .map_or_else(|| "ai".to_string(), |entry| entry.source.clone()),
             examples: result
                 .dictionaries
                 .first()
@@ -134,8 +132,15 @@ async fn run(app: &AppHandle) -> AppResult<()> {
         None
     };
 
-    // 5. 切到结果态。
+    // 5. 切到结果态，随后旁路写历史与生词记录（都不阻断主流程）。
+    let history_record = history_record_from_result(
+        &result,
+        request.target_language.clone(),
+        HistoryKind::Selection,
+    );
     popup::show(app, PopupState::Result(Box::new(result))).await?;
+
+    record_history_task(state.database.clone(), history_record).await;
 
     if let Some(record) = vocabulary_record {
         let database = state.database.clone();
@@ -148,6 +153,34 @@ async fn run(app: &AppHandle) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+/// 从翻译结果组装历史写入载荷（译入语由调用方补充——结果里没有）。
+pub fn history_record_from_result(
+    result: &TranslationResult,
+    target_language: Language,
+    kind: HistoryKind,
+) -> HistoryRecord {
+    HistoryRecord {
+        source_text: result.source_text.clone(),
+        translated_text: result.translated_text.clone(),
+        detected_language: result.detected_language.clone(),
+        target_language,
+        model: result.model.clone(),
+        kind,
+        dictionary_hit: !result.dictionaries.is_empty(),
+    }
+}
+
+/// 旁路写历史：失败只告警，绝不影响翻译主流程。
+pub async fn record_history_task(database: Database, record: HistoryRecord) {
+    let recorded =
+        tauri::async_runtime::spawn_blocking(move || database.record_history(&record)).await;
+    match recorded {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => tracing::warn!(error = %error, "failed to record history"),
+        Err(error) => tracing::warn!(error = %error, "history record task panicked"),
+    }
 }
 
 /// 从数据库 + OS 密钥库组装 AI Router：注册全部 Provider，
