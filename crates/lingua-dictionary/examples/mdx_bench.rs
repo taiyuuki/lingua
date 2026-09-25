@@ -40,7 +40,7 @@ fn main() {
     };
 
     let import_started = Instant::now();
-    let mut batch = Vec::with_capacity(BATCH);
+    let mut raw_batch = Vec::with_capacity(BATCH);
     let mut imported = 0usize;
     let mut skipped = 0usize;
     for entry in dict.entries() {
@@ -48,13 +48,27 @@ fn main() {
             skipped += 1;
             continue;
         }
-        batch.push(entry.to_dictionary_entry(&Language::Ja, &Language::Zh, "bench"));
-        if batch.len() >= BATCH {
+        raw_batch.push(entry);
+        if raw_batch.len() >= BATCH {
+            let batch = lingua_dictionary::mdx::convert_entries_parallel(
+                &raw_batch,
+                &Language::Ja,
+                &Language::Zh,
+                "bench",
+            )
+            .expect("convert batch");
             imported += database.import_dictionary(&meta, &batch).expect("import batch");
-            batch.clear();
+            raw_batch.clear();
         }
     }
-    if !batch.is_empty() {
+    if !raw_batch.is_empty() {
+        let batch = lingua_dictionary::mdx::convert_entries_parallel(
+            &raw_batch,
+            &Language::Ja,
+            &Language::Zh,
+            "bench",
+        )
+        .expect("convert last batch");
         imported += database.import_dictionary(&meta, &batch).expect("import last batch");
     }
     println!(

@@ -665,7 +665,9 @@ pub async fn import_dictionary_mdx(
         let source_language = request.source_language;
         let gloss_language = request.gloss_language;
 
-        let mut batch = Vec::with_capacity(MDX_IMPORT_BATCH);
+        // HTML 净化（html5ever）是导入的 CPU 大头：按批收集原始词条后
+        // 用 scoped threads 并行转换，数据库写入保持串行分批提交。
+        let mut raw_batch = Vec::with_capacity(MDX_IMPORT_BATCH);
         let mut imported = 0usize;
         let mut skipped = 0usize;
         for entry in dict.entries() {
@@ -673,14 +675,26 @@ pub async fn import_dictionary_mdx(
                 skipped += 1;
                 continue;
             }
-            batch.push(entry.to_dictionary_entry(&source_language, &gloss_language, &id));
-            if batch.len() >= MDX_IMPORT_BATCH {
+            raw_batch.push(entry);
+            if raw_batch.len() >= MDX_IMPORT_BATCH {
+                let batch = lingua_dictionary::mdx::convert_entries_parallel(
+                    &raw_batch,
+                    &source_language,
+                    &gloss_language,
+                    &id,
+                )?;
                 imported += database.import_dictionary(&meta, &batch)?;
                 emit_progress("importing", imported, total);
-                batch.clear();
+                raw_batch.clear();
             }
         }
-        if !batch.is_empty() {
+        if !raw_batch.is_empty() {
+            let batch = lingua_dictionary::mdx::convert_entries_parallel(
+                &raw_batch,
+                &source_language,
+                &gloss_language,
+                &id,
+            )?;
             imported += database.import_dictionary(&meta, &batch)?;
         }
         emit_progress("importing", imported, total);

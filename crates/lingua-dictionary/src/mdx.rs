@@ -76,11 +76,13 @@ impl MdxEntry {
     }
 
     /// 转换为统一词典模型：纯文本 + 净化后的富文本 HTML 各存一份。
+    /// `sanitizer` 按词典构建一次、逐条复用（见 [`html_sanitize`]）。
     pub fn to_dictionary_entry(
         &self,
         language: &Language,
         gloss_language: &Language,
         source: &str,
+        sanitizer: &crate::html_sanitize::DefinitionSanitizer,
     ) -> DictionaryEntry {
         DictionaryEntry {
             lemma: self.lemma.clone(),
@@ -92,9 +94,7 @@ impl MdxEntry {
             definitions: vec![DictionaryDefinition {
                 part_of_speech: None,
                 definition: html_to_plain_text(&self.text),
-                html: Some(crate::html_sanitize::sanitize_definition_html(
-                    &self.text, source,
-                )),
+                html: Some(sanitizer.clean(&self.text)),
                 examples: Vec::new(),
                 synonyms: Vec::new(),
                 antonyms: Vec::new(),
@@ -507,6 +507,51 @@ fn parse_container(file: Vec<u8>) -> AppResult<ContainerIndex> {
         record_blocks,
         file,
     })
+}
+
+/// 并行转换一批 MDX 词条（HTML 净化是 CPU 大头：html5ever 解析 +
+/// 纯文本转换）。每线程各建一个 [`DefinitionSanitizer`]（构建成本
+/// 相对整批可忽略），线程数封顶 8。
+pub fn convert_entries_parallel(
+    entries: &[MdxEntry],
+    language: &Language,
+    gloss_language: &Language,
+    source: &str,
+) -> AppResult<Vec<DictionaryEntry>> {
+    let threads = std::thread::available_parallelism()
+        .map_or(4, std::num::NonZeroUsize::get)
+        .min(8);
+    let chunk_size = entries.len().div_ceil(threads);
+    let mut converted = Vec::with_capacity(entries.len());
+    let mut failure: Option<AppError> = None;
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = entries
+            .chunks(chunk_size.max(1))
+            .map(|chunk| {
+                scope.spawn(move || {
+                    let sanitizer =
+                        crate::html_sanitize::DefinitionSanitizer::new(source);
+                    chunk
+                        .iter()
+                        .map(|entry| {
+                            entry.to_dictionary_entry(language, gloss_language, source, &sanitizer)
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for handle in handles {
+            match handle.join() {
+                Ok(mut part) => converted.append(&mut part),
+                Err(_) => {
+                    failure = Some(AppError::Internal(
+                        "mdx conversion thread panicked".to_string(),
+                    ));
+                }
+            }
+        }
+    });
+    failure.map_or(Ok(converted), Err)
 }
 
 /// 解包 MDD 资源包（与 .mdx 同容器，key 是资源路径）到 `out_dir`。
@@ -1119,7 +1164,8 @@ mod tests {
     fn entry_conversion_strips_html_and_decodes_entities() {
         let dict = MdxFile::parse(minimal_mdx()).unwrap();
         let entries: Vec<MdxEntry> = dict.entries().collect();
-        let entry = entries[1].to_dictionary_entry(&Language::En, &Language::Zh, "test");
+        let sanitizer = crate::html_sanitize::DefinitionSanitizer::new("test");
+        let entry = entries[1].to_dictionary_entry(&Language::En, &Language::Zh, "test", &sanitizer);
         assert_eq!(entry.lemma, "world");
         assert_eq!(entry.inflections, vec!["world2"]);
         assert_eq!(entry.definitions.len(), 1);
@@ -1279,10 +1325,13 @@ mod tests {
             source_language: Language::En,
             gloss_language: Language::Zh,
         };
+        let sanitizer = crate::html_sanitize::DefinitionSanitizer::new("test-mdx");
         let entries: Vec<DictionaryEntry> = dict
             .entries()
             .filter(|entry| !entry.is_redirect())
-            .map(|entry| entry.to_dictionary_entry(&Language::En, &Language::Zh, "test-mdx"))
+            .map(|entry| {
+                entry.to_dictionary_entry(&Language::En, &Language::Zh, "test-mdx", &sanitizer)
+            })
             .collect();
         assert_eq!(database.import_dictionary(&meta, &entries).unwrap(), 3);
 

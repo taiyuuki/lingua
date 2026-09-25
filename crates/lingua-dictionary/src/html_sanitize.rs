@@ -17,88 +17,112 @@ use std::collections::{HashMap, HashSet};
 /// MDD 资源服务协议前缀（`register_uri_scheme_protocol` 注册的同名 scheme）。
 pub const RESOURCE_SCHEME: &str = "mdx-res";
 
-/// 净化一段 MDX 释义 HTML。`dictionary_id` 用于拼资源 URL 前缀。
-pub fn sanitize_definition_html(html: &str, dictionary_id: &str) -> String {
-    // host 固定 localhost，词典 id 与资源路径都编码进路径段：
-    // WebView 对自定义 scheme 的 host 字符集有限制（id 可能是中文）。
-    let base = format!(
-        "{RESOURCE_SCHEME}://localhost/{}/",
-        percent_encode_path(dictionary_id),
-    );
+/// 词典级净化器：白名单 Builder 只构建一次，逐条 [`clean`] 复用
+/// （百万级导入时每条重建 Builder + html5ever 解析会拖慢数十秒）。
+pub struct DefinitionSanitizer {
+    builder: Builder<'static>,
+}
 
-    let tags: HashSet<&str> = [
-        "div", "p", "span", "b", "i", "u", "em", "strong", "small", "big", "sup", "sub",
-        "br", "hr", "ul", "ol", "li", "dl", "dt", "dd", "table", "thead", "tbody",
-        "tfoot", "tr", "td", "th", "caption", "h1", "h2", "h3", "h4", "h5", "h6",
-        "blockquote", "abbr", "font", "a", "img", "link",
-    ]
-    .into_iter()
-    .collect();
+impl DefinitionSanitizer {
+    pub fn new(dictionary_id: &str) -> Self {
+        // host 固定 localhost，词典 id 与资源路径都编码进路径段：
+        // WebView 对自定义 scheme 的 host 字符集有限制（id 可能是中文）。
+        let base = format!(
+            "{RESOURCE_SCHEME}://localhost/{}/",
+            percent_encode_path(dictionary_id),
+        );
 
-    let mut tag_attributes: HashMap<&str, HashSet<&str>> = HashMap::new();
-    tag_attributes.insert(
-        "a",
-        ["href"].into_iter().collect(),
-    );
-    tag_attributes.insert(
-        "img",
-        ["src", "alt", "width", "height"].into_iter().collect(),
-    );
-    tag_attributes.insert(
-        "link",
-        ["href", "rel", "type"].into_iter().collect(),
-    );
-    tag_attributes.insert(
-        "font",
-        ["color", "face", "size"].into_iter().collect(),
-    );
-    tag_attributes.insert(
-        "table",
-        ["border", "cellspacing", "cellpadding", "width", "align"].into_iter().collect(),
-    );
-    tag_attributes.insert(
-        "td",
-        ["colspan", "rowspan", "align", "valign", "width", "height"]
-            .into_iter()
-            .collect(),
-    );
-    tag_attributes.insert(
-        "th",
-        ["colspan", "rowspan", "align", "valign", "width", "height"]
-            .into_iter()
-            .collect(),
-    );
-    tag_attributes.insert("ol", ["start", "type"].into_iter().collect());
+        let tags: HashSet<&str> = [
+            "div", "p", "span", "b", "i", "u", "em", "strong", "small", "big", "sup", "sub",
+            "br", "hr", "ul", "ol", "li", "dl", "dt", "dd", "table", "thead", "tbody",
+            "tfoot", "tr", "td", "th", "caption", "h1", "h2", "h3", "h4", "h5", "h6",
+            "blockquote", "abbr", "font", "a", "img", "link",
+        ]
+        .into_iter()
+        .collect();
 
-    let mut builder = Builder::new();
-    builder.tags(tags);
-    builder.tag_attributes(tag_attributes);
-    builder.generic_attributes(["class", "style"].into_iter().collect());
-    // entry（词条内链）与 mdx-res（资源）是自有 scheme；data 允许
-    // 行内小图；外链 http(s) 放行 scheme 但 a 的 href 过滤只留 entry://。
-    builder.url_schemes(
-        ["https", "http", "mailto", "data", "entry", RESOURCE_SCHEME]
-            .into_iter()
-            .collect(),
-    );
-    builder.url_relative(UrlRelative::PassThrough);
-    builder.link_rel(None);
-    builder.attribute_filter(move |element, attribute, value| {
-        match (element, attribute) {
-            (_, "style") => Some(Cow::Owned(sanitize_style(value))),
-            ("a", "href") => {
-                // 弹窗里外链点不开浏览器：只保留词条内链。
-                if value.trim().to_ascii_lowercase().starts_with("entry://") {
-                    Some(Cow::Borrowed(value))
-                } else {
-                    None
+        let mut tag_attributes: HashMap<&str, HashSet<&str>> = HashMap::new();
+        tag_attributes.insert("a", ["href"].into_iter().collect());
+        tag_attributes.insert(
+            "img",
+            ["src", "alt", "width", "height"].into_iter().collect(),
+        );
+        tag_attributes.insert(
+            "link",
+            ["href", "rel", "type"].into_iter().collect(),
+        );
+        tag_attributes.insert(
+            "font",
+            ["color", "face", "size"].into_iter().collect(),
+        );
+        tag_attributes.insert(
+            "table",
+            ["border", "cellspacing", "cellpadding", "width", "align"]
+                .into_iter()
+                .collect(),
+        );
+        tag_attributes.insert(
+            "td",
+            ["colspan", "rowspan", "align", "valign", "width", "height"]
+                .into_iter()
+                .collect(),
+        );
+        tag_attributes.insert(
+            "th",
+            ["colspan", "rowspan", "align", "valign", "width", "height"]
+                .into_iter()
+                .collect(),
+        );
+        tag_attributes.insert("ol", ["start", "type"].into_iter().collect());
+
+        let mut builder = Builder::new();
+        builder.tags(tags);
+        builder.tag_attributes(tag_attributes);
+        builder.generic_attributes(["class", "style"].into_iter().collect());
+        // entry（词条内链）与 mdx-res（资源）是自有 scheme；data 允许
+        // 行内小图；外链 http(s) 放行 scheme 但 a 的 href 过滤只留 entry://。
+        builder.url_schemes(
+            ["https", "http", "mailto", "data", "entry", RESOURCE_SCHEME]
+                .into_iter()
+                .collect(),
+        );
+        builder.url_relative(UrlRelative::PassThrough);
+        builder.link_rel(None);
+        builder.attribute_filter(move |element, attribute, value| {
+            match (element, attribute) {
+                (_, "style") => Some(Cow::Owned(sanitize_style(value))),
+                ("a", "href") => {
+                    // 弹窗里外链点不开浏览器：只保留词条内链。
+                    if value.trim().to_ascii_lowercase().starts_with("entry://") {
+                        Some(Cow::Borrowed(value))
+                    } else {
+                        None
+                    }
                 }
+                ("img", "src") | ("link", "href") => rewrite_resource(value, &base),
+                _ => Some(Cow::Borrowed(value)),
             }
-            ("img", "src") | ("link", "href") => rewrite_resource(value, &base),
-            _ => Some(Cow::Borrowed(value)),
+        });
+        Self { builder }
+    }
+
+    /// 净化一条释义。
+    ///
+    /// 快路径：不含 `<` 的纯文本记录不可能构成标签，原样返回
+    /// （实体引用交给浏览器照常解码）——纯文本词库（如简明英汉汉英）
+    /// 占比接近 100%，可省掉整套 html5ever 解析。
+    pub fn clean(&self, html: &str) -> String {
+        if !html.contains('<') {
+            return html.to_string();
         }
-    });
-    builder.clean(html).to_string()
+        self.builder.clean(html).to_string()
+    }
+}
+
+/// 净化一段 MDX 释义 HTML（单条一次性场景用；批量导入请复用
+/// [`DefinitionSanitizer`]）。
+pub fn sanitize_definition_html(html: &str, dictionary_id: &str) -> String {
+    DefinitionSanitizer::new(dictionary_id).clean(html)
 }
 
 /// CSS 声明白名单：排版相关的属性放行，定位/行为类剥除。

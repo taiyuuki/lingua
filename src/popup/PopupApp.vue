@@ -510,9 +510,9 @@ function onToolbarMouseDown(event: MouseEvent): void {
               v-for="(definition, index) in state.dictionary.definitions.slice(0, 8)"
               :key="index"
             >
-              <!-- 富文本（导入期已净化）与纯文本两套渲染，折叠交互共用 -->
-              <!-- 内容在导入期经 ammonia 白名单净化，渲染可信 -->
-              <!-- eslint-disable-next-line vue/no-v-html -->
+              <!-- 富文本（导入期已净化）与纯文本两套渲染，折叠交互共用。
+                   内容在导入期经 ammonia 白名单净化，渲染端可信。 -->
+              <!-- eslint-disable vue/no-v-html -->
               <div
                 v-if="definition.html"
                 :class="['popup-dict-rich', {
@@ -524,6 +524,7 @@ function onToolbarMouseDown(event: MouseEvent): void {
                 @click="onRichClick($event, index, definition.definition)"
                 v-html="definition.html"
               />
+              <!-- eslint-enable vue/no-v-html -->
               <div
                 v-else
                 :class="['popup-dict-text', {
