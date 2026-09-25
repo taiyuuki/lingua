@@ -306,6 +306,22 @@ export async function pickDictionaryFilePath(): Promise<string | null> {
   return typeof selection === "string" ? selection : null;
 }
 
+/** 保存对话框：选 Anki 导出文件路径；取消返回 null。 */
+export async function pickAnkiExportPath(): Promise<string | null> {
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const date = new Date().toISOString().slice(0, 10);
+  const path = await save({
+    defaultPath: `lingua-anki-${date}.txt`,
+    filters: [{ name: "Anki 导入文件", extensions: ["txt"] }],
+  });
+  return path ?? null;
+}
+
+/** 导出全部生词为 Anki 可导入的 TSV，返回导出条数。 */
+export async function exportVocabularyAnki(path: string): Promise<number> {
+  return invoke<number>("export_vocabulary_anki", { path });
+}
+
 /** 主题变更广播：主窗口保存设置后发，所有窗口应用新主题。 */
 export async function broadcastThemeChanged(theme: string): Promise<void> {
   await emit("theme://changed", theme);

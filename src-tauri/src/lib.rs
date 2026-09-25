@@ -128,6 +128,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::is_word,
             commands::vocabulary_word_status,
             commands::remove_vocabulary_word,
+            commands::export_vocabulary_anki,
             commands::list_history,
             commands::history_count,
             commands::delete_history,

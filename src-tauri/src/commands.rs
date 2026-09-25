@@ -1379,6 +1379,76 @@ pub async fn save_to_vocabulary(
     .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
+// ---------- 生词本导出（Anki TSV） ----------
+
+/// 把词条字段净化为单行 TSV 字段：tab / 换行会破坏行结构，折叠为空格。
+fn flatten_tsv_field(field: &str) -> String {
+    field
+        .split(['\t', '\r', '\n'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Anki 可直接导入的 TSV（`文件 → 导入`，无需插件）。
+/// 头部指令声明分隔符与标签列；列：Word / Meaning / Examples / Notes，
+/// 第 5 列为 Anki 标签（词条标签 + 语言）。
+fn build_anki_tsv(items: &[lingua_core::VocabularyItem]) -> String {
+    let mut out = String::from(
+        "#separator:tab\n#html:false\n#columns:Word\tMeaning\tExamples\tNotes\n#tags column:5\n",
+    );
+    for item in items {
+        let word = flatten_tsv_field(&item.word);
+        let meaning = item
+            .translation
+            .as_deref()
+            .map(flatten_tsv_field)
+            .unwrap_or_default();
+        let examples = item
+            .examples
+            .iter()
+            .map(|example| flatten_tsv_field(example))
+            .filter(|example| !example.is_empty())
+            .collect::<Vec<_>>()
+            .join(" / ");
+        let notes = flatten_tsv_field(&item.notes);
+        let mut tags = item.tags.clone();
+        tags.push(item.language.code().to_string());
+        let tags = tags
+            .iter()
+            .map(|tag| flatten_tsv_field(tag))
+            .filter(|tag| !tag.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.push_str(&format!("{word}\t{meaning}\t{examples}\t{notes}\t{tags}\n"));
+    }
+    out
+}
+
+/// 导出全部生词为 Anki 可导入的 TSV。返回导出条数。
+#[tauri::command]
+pub async fn export_vocabulary_anki(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<usize, AppError> {
+    if path.trim().is_empty() {
+        return Err(AppError::InvalidInput("path is required".to_string()));
+    }
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = database.list_vocabulary(&lingua_database::VocabularyFilter {
+            limit: 1_000_000,
+            ..Default::default()
+        })?;
+        let count = items.len();
+        std::fs::write(&path, build_anki_tsv(&items))
+            .map_err(|error| AppError::Internal(format!("failed to write export file: {error}")))?;
+        Ok(count)
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
 // ---------- 学习分析（Phase 9） ----------
 
 /// 学习分析请求 DTO（Popup 结果态发起）。
@@ -1620,6 +1690,82 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+    use lingua_core::Mastery;
+
+    fn vocab_item(
+        word: &str,
+        translation: Option<&str>,
+        examples: &[&str],
+        notes: &str,
+        tags: &[&str],
+    ) -> lingua_core::VocabularyItem {
+        lingua_core::VocabularyItem {
+            id: 1,
+            word: word.into(),
+            language: Language::En,
+            translation: translation.map(str::to_string),
+            notes: notes.into(),
+            tags: tags.iter().map(|tag| tag.to_string()).collect(),
+            mastery: Mastery::New,
+            lookup_count: 1,
+            review_count: 0,
+            source: "ai".into(),
+            examples: examples.iter().map(|example| example.to_string()).collect(),
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            last_seen_at: "2026-01-01T00:00:00.000Z".into(),
+        }
+    }
+
+    #[test]
+    fn anki_tsv_has_header_and_rows() {
+        let items = vec![
+            vocab_item(
+                "ephemeral",
+                Some("短暂的"),
+                &["an ephemeral moment"],
+                "GRE 高频",
+                &["gre"],
+            ),
+            vocab_item("猫", None, &[], "", &[]),
+        ];
+        let tsv = build_anki_tsv(&items);
+        let mut lines = tsv.lines();
+        assert_eq!(lines.next(), Some("#separator:tab"));
+        assert_eq!(lines.next(), Some("#html:false"));
+        assert_eq!(
+            lines.next(),
+            Some("#columns:Word\tMeaning\tExamples\tNotes")
+        );
+        assert_eq!(lines.next(), Some("#tags column:5"));
+        let row1 = lines.next().unwrap();
+        let cells: Vec<&str> = row1.split('\t').collect();
+        assert_eq!(cells[0], "ephemeral");
+        assert_eq!(cells[1], "短暂的");
+        assert_eq!(cells[2], "an ephemeral moment");
+        assert_eq!(cells[3], "GRE 高频");
+        assert_eq!(cells[4], "gre en");
+        let row2 = lines.next().unwrap();
+        let cells: Vec<&str> = row2.split('\t').collect();
+        assert_eq!(cells[0], "猫");
+        assert_eq!(cells[1], "", "无译文留空");
+        assert_eq!(cells[2], "");
+        assert_eq!(cells[4], "en", "无标签也带语言标签");
+        assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn anki_tsv_fields_are_flattened() {
+        let items = vec![vocab_item(
+            "multi\nline\tword",
+            Some("含\t制表符"),
+            &["例句一\n第二行", ""],
+            "笔记\r\n换行",
+            &["tag with\nnewline"],
+        )];
+        let tsv = build_anki_tsv(&items);
+        let row = tsv.lines().last().unwrap();
+        assert_eq!(row.split('\t').count(), 5, "字段内换行/制表符已折叠: {row}");
+    }
 
     #[test]
     fn generated_ids_are_slugged_and_stable() {

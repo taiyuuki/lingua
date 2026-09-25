@@ -26,6 +26,10 @@ import {
 } from "../stores/vocabulary";
 import { SUPPORTED_LANGUAGES } from "../stores/settings";
 import { lookupEntriesForWord } from "../lib/dictRender";
+import {
+  exportVocabularyAnki,
+  pickAnkiExportPath,
+} from "../lib/api";
 import type {
   DictionaryEntryDto,
   Mastery,
@@ -167,6 +171,29 @@ async function batchApplyTags(): Promise<void> {
   await store.batchUpdate([...selectedIds.value], null, addTags);
   batchTagInput.value = "";
   clearSelection();
+}
+
+// ---- Anki 导出 ----
+const exporting = ref(false);
+const exportMessage = ref<string | null>(null);
+const exportError = ref<string | null>(null);
+
+async function exportAnki(): Promise<void> {
+  exportMessage.value = null;
+  exportError.value = null;
+  const path = await pickAnkiExportPath();
+  if (!path) {
+    return; // 用户取消
+  }
+  exporting.value = true;
+  try {
+    const count = await exportVocabularyAnki(path);
+    exportMessage.value = `已导出 ${count} 条生词，在 Anki 中「文件 → 导入」选择该文件即可。`;
+  } catch (error) {
+    exportError.value = String(error);
+  } finally {
+    exporting.value = false;
+  }
 }
 
 // ---- 编辑 ----
@@ -428,15 +455,40 @@ onUnmounted(() => {
         {{ loadError }}
       </n-alert>
 
-      <!-- 筛选：搜索 + 掌握度统计（点击即筛）+ 标签 chips -->
-      <n-input
-        v-model:value="filter.search"
-        placeholder="搜索（词 / 译文 / 笔记），回车应用"
-        clearable
-        style="margin-bottom: 10px"
-        @keydown.enter="store.applyFilters()"
-        @blur="store.applyFilters()"
-      />
+      <!-- 筛选：搜索 + 导出 + 掌握度统计（点击即筛）+ 标签 chips -->
+      <div class="vocab-toolbar">
+        <n-input
+          v-model:value="filter.search"
+          placeholder="搜索（词 / 译文 / 笔记），回车应用"
+          clearable
+          style="flex: 1"
+          @keydown.enter="store.applyFilters()"
+          @blur="store.applyFilters()"
+        />
+        <n-button
+          size="small"
+          secondary
+          :loading="exporting"
+          :disabled="total === 0"
+          @click="exportAnki"
+        >
+          导出 Anki
+        </n-button>
+      </div>
+      <n-text
+        v-if="exportMessage"
+        type="success"
+        style="display: block; margin-bottom: 10px; font-size: 12.5px"
+      >
+        {{ exportMessage }}
+      </n-text>
+      <n-text
+        v-else-if="exportError"
+        type="error"
+        style="display: block; margin-bottom: 10px; font-size: 12.5px"
+      >
+        {{ exportError }}
+      </n-text>
       <!-- 语言分组：点击筛选 -->
       <div
         v-if="languageCounts.length > 1"
@@ -823,6 +875,14 @@ onUnmounted(() => {
   border-style: solid;
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+
+/* 搜索 + 导出工具行 */
+.vocab-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 /* 批量操作条 */
