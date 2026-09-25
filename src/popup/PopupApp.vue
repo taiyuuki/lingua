@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getAppSettings,
-  dictionaryLookup,
   hidePopup,
   isWord,
   latestPopupState,
@@ -18,10 +17,13 @@ import {
   saveToVocabulary,
   togglePopupPin,
   vocabularyWordStatus,
+  type DictionaryEntryDto,
   type OcrSourceInfo,
   type PopupState,
 } from "../lib/api";
 import { applyTheme, normalizeTheme } from "../lib/theme";
+import { lookupEntriesForWord } from "../lib/dictRender";
+import DictionaryEntryPanel from "../components/DictionaryEntryPanel.vue";
 
 // 快照同款「事件 + 快照」双通道；窗口复用，靠通知保持最新状态。
 // 布局参考 Bob：顶部工具栏（置顶/收藏/复制原文）→ 原文区 → 译文卡片。
@@ -40,118 +42,27 @@ const favoriteWord = reactive({ word: "", language: null as string | null });
 const visionRetryAvailable = ref(false);
 // 识别来源：让用户能区分「识别错了」和「Vision 根本没触发」。
 const ocrSource = ref<OcrSourceInfo | null>(null);
-// 词典长释义（MDX 词库动辄几十行）：默认折叠，点击展开/收起。
-const expandedDefinitions = ref(new Set<number>());
-// 换词条（新查询结果到达）时收起全部。
-watch(state, () => {
-  expandedDefinitions.value = new Set();
-});
+// 当前展示的词典词条（由共享面板经 active-change 上报）。
+const activeEntry = ref<DictionaryEntryDto | null>(null);
 
-function isLongDefinition(text: string): boolean {
-  return text.length > 160 || text.split("\n").length > 5;
+function onActiveEntryChange(entry: DictionaryEntryDto | null): void {
+  activeEntry.value = entry;
 }
 
-function onDefinitionToggle(index: number, text: string): void {
-  if (!isLongDefinition(text)) {
-    return;
-  }
-  const next = new Set(expandedDefinitions.value);
-  if (next.has(index)) {
-    next.delete(index);
-  } else {
-    next.add(index);
-  }
-  expandedDefinitions.value = next;
-}
-
-/** 富文本区点击：词条内链（entry:///#锚点/词头）与发音链接（资源
- *  音频，导入期由 sound:// 改写而来）；其余点击不拦截——文本区留给
- *  选择/复制。词典自带的 <script> 不执行，发音用原生 Audio 播放。 */
-const AUDIO_URL = /\.(mp3|wav|ogg|oga|m4a|aac|spx|opus|flac|webm)(\?|$)/i;
-let currentAudio: HTMLAudioElement | null = null;
-
-function onRichLinkClick(event: MouseEvent): void {
-  const anchor = (event.target as HTMLElement | null)?.closest?.(
-    "a[href]",
-  ) as HTMLAnchorElement | null;
-  if (!anchor) {
-    return;
-  }
-  const href = anchor.getAttribute("href") ?? "";
-  event.preventDefault();
-  if (href.startsWith("entry://#")) {
-    // 词条内锚点：滚动定位到 <a name>/[id]
-    const anchorId = CSS.escape(href.slice("entry://#".length));
-    const container = anchor.closest(".popup-dict-rich");
-    const target = container?.querySelector(
-      `[name="${anchorId}"], [id="${anchorId}"]`,
-    );
-    target?.scrollIntoView({ block: "start", behavior: "smooth" });
-    return;
-  }
-  if (href.startsWith("entry://")) {
-    const word = href.replace(/^entry:\/\//, "");
-    void jumpToEntry(decodeURIComponent(word).trim());
-    return;
-  }
-  if (AUDIO_URL.test(anchor.href) && anchor.href.includes("mdx-res")) {
-    currentAudio?.pause();
-    currentAudio = new Audio(anchor.href);
-    void currentAudio.play().catch(() => {
-      // 音频缺失/解码失败静默
-    });
-  }
-}
-
-// Windows 的 WebView2 不支持自定义 scheme 的子资源加载（wry 仅在
-// 导航时做 scheme 转换），渲染前把资源 URL 转成 http://mdx-res.localhost
-// 形态（与 tauri asset 协议的 convertFileSrc 同一约定）。
-// 库里存平台无关的 mdx-res:// 形态，换平台无需重导。
-const MDX_RES_ORIGIN = navigator.userAgent.includes("Windows")
-  ? "http://mdx-res.localhost/"
-  : "mdx-res://localhost/";
-
-function renderRichHtml(html: string): string {
-  return html.replaceAll("mdx-res://localhost/", MDX_RES_ORIGIN);
-}
-
-/** 内链跳词：命中则局部替换当前词条，未命中/失败静默保留。 */
+/** 内链跳词（面板 lookup-word 事件）：命中则替换全部词典词条，
+ *  未命中/失败静默保留。 */
 async function jumpToEntry(word: string): Promise<void> {
   if (!word || state.value.status !== "result") {
     return;
   }
-  try {
-    const entry = await dictionaryLookup(word);
-    if (entry && state.value.status === "result") {
-      state.value.dictionaries = [entry];
-      activeDictionaryIndex.value = 0;
-      expandedDefinitions.value = new Set();
-    }
-  } catch {
-    // 静默：跳词失败不影响当前展示
+  const entries = await lookupEntriesForWord(word);
+  if (entries.length > 0 && state.value.status === "result") {
+    state.value.dictionaries = entries;
   }
 }
 let unlisten: (() => void) | null = null;
 let unlistenTheme: (() => void) | null = null;
 let unlistenDelta: (() => void) | null = null;
-
-/** 多词典：当前展示的词典下标（换词条/跳词时回到首选）。 */
-const activeDictionaryIndex = ref(0);
-const activeEntry = computed(() =>
-  state.value.status === "result"
-    ? (state.value.dictionaries[activeDictionaryIndex.value] ?? null)
-    : null,
-);
-
-function switchDictionary(index: number): void {
-  activeDictionaryIndex.value = index;
-  expandedDefinitions.value = new Set();
-}
-
-// 换词条时回到首选词典（在 activeDictionaryIndex 声明之后注册）。
-watch(state, () => {
-  activeDictionaryIndex.value = 0;
-});
 
 const engineLabel = computed(() =>
   state.value.status === "result" ? (activeEntry.value?.source ?? "AI 翻译") : "",
@@ -563,77 +474,16 @@ function onToolbarMouseDown(event: MouseEvent): void {
           {{ state.translatedText }}
         </p>
 
-        <!-- 词典视图：多词典切换 + 词条释义/例句 -->
+        <!-- 词典视图：多词典切换 + 词条释义/例句（共享面板，词卡同款） -->
         <div
-          v-if="activeEntry"
+          v-if="state.dictionaries.length > 0"
           class="popup-dictionary"
         >
-          <div
-            v-if="state.dictionaries.length > 1"
-            class="popup-dict-switcher"
-          >
-            <button
-              v-for="(entry, index) in state.dictionaries"
-              :key="entry.source"
-              type="button"
-              :class="['popup-dict-tab', {
-                'popup-dict-tab-active': index === activeDictionaryIndex,
-              }]"
-              :title="entry.lemma"
-              @click="switchDictionary(index)"
-            >
-              {{ entry.source }}
-            </button>
-          </div>
-          <ol class="popup-dict-definitions">
-            <li
-              v-for="(definition, index) in activeEntry.definitions.slice(0, 8)"
-              :key="index"
-            >
-              <!-- 富文本（导入期已净化）与纯文本两套渲染，折叠交互共用。
-                   内容在导入期经 ammonia 白名单净化，渲染端可信。 -->
-              <!-- eslint-disable vue/no-v-html -->
-              <div
-                v-if="definition.html"
-                class="popup-dict-rich"
-                @click="onRichLinkClick($event)"
-                v-html="renderRichHtml(definition.html)"
-              />
-              <!-- eslint-enable vue/no-v-html -->
-              <div
-                v-else
-                :class="['popup-dict-text', {
-                  'popup-dict-clamped':
-                    isLongDefinition(definition.definition)
-                    && !expandedDefinitions.has(index),
-                }]"
-              >
-                <span
-                  v-if="definition.partOfSpeech"
-                  class="chip"
-                >{{ definition.partOfSpeech }}</span>
-                {{ definition.definition }}
-              </div>
-              <span
-                v-if="!definition.html && isLongDefinition(definition.definition)"
-                class="popup-dict-toggle"
-                @click="onDefinitionToggle(index, definition.definition)"
-              >
-                {{ expandedDefinitions.has(index) ? "收起 ▴" : "展开全部 ▾" }}
-              </span>
-              <ul
-                v-if="definition.examples.length > 0"
-                class="popup-dict-examples"
-              >
-                <li
-                  v-for="example in definition.examples.slice(0, 2)"
-                  :key="example"
-                >
-                  {{ example }}
-                </li>
-              </ul>
-            </li>
-          </ol>
+          <DictionaryEntryPanel
+            :entries="state.dictionaries"
+            @lookup-word="jumpToEntry"
+            @active-change="onActiveEntryChange"
+          />
         </div>
 
         <template v-else>

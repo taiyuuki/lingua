@@ -10,7 +10,7 @@
 
 use crate::{Database, db_err};
 use lingua_core::{AppResult, Language, Mastery, VocabularyItem};
-use rusqlite::{OptionalExtension, ToSql, params, params_from_iter};
+use rusqlite::{OptionalExtension, params, params_from_iter};
 
 /// 一次生词条目的写入（划词自动记录或手动收藏）。
 #[derive(Debug, Clone)]
@@ -258,6 +258,76 @@ impl Database {
             .execute("DELETE FROM vocabulary WHERE id = ?1", params![id])
             .map_err(db_err)?;
         Ok(changed > 0)
+    }
+
+    /// 批量删除（单事务），返回实际删除条数。
+    pub fn batch_delete_vocabulary(&self, ids: &[i64]) -> AppResult<usize> {
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let mut deleted = 0usize;
+        for id in ids {
+            deleted += tx
+                .execute("DELETE FROM vocabulary WHERE id = ?1", params![id])
+                .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(deleted)
+    }
+
+    /// 批量更新（单事务）：设掌握度、追加标签（去重）。
+    /// 返回实际更新的条数。
+    pub fn batch_update_vocabulary(
+        &self,
+        ids: &[i64],
+        mastery: Option<Mastery>,
+        add_tags: &[String],
+    ) -> AppResult<usize> {
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let mut updated = 0usize;
+        for id in ids {
+            let tags: Vec<String> = tx
+                .query_row(
+                    "SELECT tags FROM vocabulary WHERE id = ?1",
+                    params![id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(db_err)
+                .and_then(|raw| {
+                    serde_json::from_str::<Vec<String>>(&raw).map_err(|error| {
+                        crate::db_err(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
+                    })
+                })
+                .unwrap_or_default();
+            let mut merged = tags;
+            for tag in add_tags {
+                if !merged.contains(tag) {
+                    merged.push(tag.clone());
+                }
+            }
+            let tags_json = serde_json::to_string(&merged)
+                .map_err(|error| db_err(rusqlite::Error::ToSqlConversionFailure(Box::new(error))))?;
+            let changed = match mastery {
+                Some(mastery) => {
+                    tx.execute(
+                        "UPDATE vocabulary SET mastery = ?2, tags = ?3 WHERE id = ?1",
+                        params![id, mastery.to_db(), tags_json],
+                    )
+                    .map_err(db_err)?
+                }
+                None if !add_tags.is_empty() => {
+                    tx.execute(
+                        "UPDATE vocabulary SET tags = ?2 WHERE id = ?1",
+                        params![id, tags_json],
+                    )
+                    .map_err(db_err)?
+                }
+                None => 0,
+            };
+            updated += changed;
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(updated)
     }
 
     /// 复习打点：写 `vocabulary_reviews` + `review_count` 自增。

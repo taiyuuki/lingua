@@ -370,6 +370,17 @@ export async function dictionaryLookup(
   });
 }
 
+/** 多词典词卡：按词头查全部命中词典（导入顺序，完整释义）。 */
+export async function lookupWordDictionaries(
+  word: string,
+  language?: string | null,
+): Promise<DictionaryEntryDto[]> {
+  return invoke<DictionaryEntryDto[]>("lookup_word_dictionaries", {
+    word,
+    language: language ?? null,
+  });
+}
+
 export async function listVocabulary(
   filter: VocabularyFilterDto,
 ): Promise<VocabularyItemDto[]> {
@@ -394,6 +405,24 @@ export async function updateVocabulary(
 
 export async function deleteVocabulary(id: number): Promise<void> {
   await invoke("delete_vocabulary", { id });
+}
+
+/** 批量删除生词，返回实际删除条数。 */
+export async function vocabularyBatchDelete(ids: number[]): Promise<number> {
+  return invoke<number>("vocabulary_batch_delete", { ids });
+}
+
+/** 批量更新生词（掌握度和/或追加标签），返回实际更新条数。 */
+export async function vocabularyBatchUpdate(
+  ids: number[],
+  mastery: Mastery | null,
+  addTags: string[] | null,
+): Promise<number> {
+  return invoke<number>("vocabulary_batch_update", {
+    ids,
+    mastery,
+    addTags,
+  });
 }
 
 export async function getVocabularyTags(): Promise<string[]> {

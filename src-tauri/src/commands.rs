@@ -871,6 +871,30 @@ pub async fn dictionary_lookup(
     .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
+/// 多词典词卡：按词头查全部命中词典（导入顺序，含完整释义 HTML），
+/// 生词本词卡与弹窗内链跳词共用。
+#[tauri::command]
+pub async fn lookup_word_dictionaries(
+    state: tauri::State<'_, AppState>,
+    word: String,
+    language: Option<Language>,
+) -> Result<Vec<lingua_core::DictionaryEntry>, AppError> {
+    let word = word.trim().to_string();
+    if word.is_empty() {
+        return Ok(Vec::new());
+    }
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let entries = database.lookup_entries(&word, language)?;
+        Ok(entries
+            .into_iter()
+            .filter(lingua_core::DictionaryEntry::has_definitions)
+            .collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
 #[tauri::command]
 pub async fn delete_dictionary(
     app: tauri::AppHandle,
@@ -971,6 +995,34 @@ pub async fn delete_vocabulary(state: tauri::State<'_, AppState>, id: i64) -> Re
     tauri::async_runtime::spawn_blocking(move || {
         database.delete_vocabulary(id)?;
         Ok(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 批量删除生词（单事务）。返回实际删除条数。
+#[tauri::command]
+pub async fn vocabulary_batch_delete(
+    state: tauri::State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<usize, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.batch_delete_vocabulary(&ids))
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 批量更新生词：设掌握度和/或追加标签（去重）。返回实际更新条数。
+#[tauri::command]
+pub async fn vocabulary_batch_update(
+    state: tauri::State<'_, AppState>,
+    ids: Vec<i64>,
+    mastery: Option<Mastery>,
+    add_tags: Option<Vec<String>>,
+) -> Result<usize, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database.batch_update_vocabulary(&ids, mastery, add_tags.as_deref().unwrap_or(&[]))
     })
     .await
     .map_err(|error| AppError::Internal(error.to_string()))?

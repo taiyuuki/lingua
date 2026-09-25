@@ -5,6 +5,7 @@ import {
   NAlert,
   NButton,
   NCard,
+  NCheckbox,
   NEmpty,
   NForm,
   NFormItem,
@@ -23,18 +24,60 @@ import {
   VOCABULARY_PAGE_SIZE,
   useVocabularyStore,
 } from "../stores/vocabulary";
-import type { Mastery, VocabularyItemDto } from "../lib/api";
+import { lookupEntriesForWord } from "../lib/dictRender";
+import type {
+  DictionaryEntryDto,
+  Mastery,
+  VocabularyItemDto,
+} from "../lib/api";
+import DictionaryEntryPanel from "./DictionaryEntryPanel.vue";
 
 const store = useVocabularyStore();
-const { items, total, page, tags, loadError, editError, filter } =
-  storeToRefs(store);
+const {
+  items,
+  total,
+  page,
+  tags,
+  loadError,
+  editError,
+  filter,
+  masteryCounts,
+} = storeToRefs(store);
 
 const editingId = ref<number | null>(null);
 const editForm = reactive({ notes: "", tags: "", mastery: "new" as Mastery });
 
-const masteryTagType = (mastery: Mastery): "success" | "warning" | "default" =>
-  mastery === "mastered" ? "success" : mastery === "learning" ? "warning" : "default";
+// ---- 词卡（点词头展开多词典释义）----
+const expandedCardId = ref<number | null>(null);
+const cardEntries = ref<Record<number, DictionaryEntryDto[]>>({});
 
+async function toggleCard(item: VocabularyItemDto): Promise<void> {
+  if (expandedCardId.value === item.id) {
+    expandedCardId.value = null;
+    return;
+  }
+  expandedCardId.value = item.id;
+  if (!cardEntries.value[item.id]) {
+    cardEntries.value = {
+      ...cardEntries.value,
+      [item.id]: await lookupEntriesForWord(item.word, item.language),
+    };
+  }
+}
+
+/** 词卡内 entry:// 跳词：替换该卡的词典数据。 */
+async function cardLookupWord(word: string): Promise<void> {
+  const id = expandedCardId.value;
+  if (id === null || !word) {
+    return;
+  }
+  const entries = await lookupEntriesForWord(word);
+  if (entries.length > 0) {
+    cardEntries.value = { ...cardEntries.value, [id]: entries };
+  }
+}
+
+// ---- 掌握度 ----
 const masteryLabel = (mastery: Mastery): string =>
   MASTERY_OPTIONS.find((option) => option.value === mastery)?.label ?? mastery;
 
@@ -43,14 +86,74 @@ const masteryOptions = MASTERY_OPTIONS.map((option) => ({
   value: option.value,
 }));
 
-const tagOptions = computed(() =>
-  tags.value.map((tag) => ({ label: tag, value: tag })),
+const masteryStats = computed(() =>
+  MASTERY_OPTIONS.map((option) => ({
+    ...option,
+    count: masteryCounts.value[option.value],
+  })),
 );
 
-const pageCount = computed(() =>
-  Math.max(1, Math.ceil(total.value / VOCABULARY_PAGE_SIZE)),
-);
+function toggleMasteryFilter(mastery: Mastery): void {
+  filter.value.mastery = filter.value.mastery === mastery ? "" : mastery;
+  void store.applyFilters();
+}
 
+// ---- 标签 chips ----
+function toggleTagFilter(tag: string): void {
+  filter.value.tag = filter.value.tag === tag ? "" : tag;
+  void store.applyFilters();
+}
+
+// ---- 批量操作 ----
+const selectedIds = ref(new Set<number>());
+const batchTagInput = ref("");
+const batchMastery = ref<Mastery | null>(null);
+
+const hasSelection = computed(() => selectedIds.value.size > 0);
+
+function toggleSelected(id: number, checked: boolean): void {
+  const next = new Set(selectedIds.value);
+  if (checked) {
+    next.add(id);
+  } else {
+    next.delete(id);
+  }
+  selectedIds.value = next;
+}
+
+function clearSelection(): void {
+  selectedIds.value = new Set();
+  batchTagInput.value = "";
+  batchMastery.value = null;
+}
+
+async function batchDelete(): Promise<void> {
+  await store.batchRemove([...selectedIds.value]);
+  clearSelection();
+}
+
+async function batchApplyMastery(): Promise<void> {
+  if (!batchMastery.value) {
+    return;
+  }
+  await store.batchUpdate([...selectedIds.value], batchMastery.value, null);
+  clearSelection();
+}
+
+async function batchApplyTags(): Promise<void> {
+  const addTags = batchTagInput.value
+    .split(/[,,]/)
+    .map((tag) => tag.trim())
+    .filter((tag) => tag !== "");
+  if (addTags.length === 0) {
+    return;
+  }
+  await store.batchUpdate([...selectedIds.value], null, addTags);
+  batchTagInput.value = "";
+  clearSelection();
+}
+
+// ---- 编辑 ----
 function startEdit(item: VocabularyItemDto): void {
   editingId.value = item.id;
   editForm.notes = item.notes;
@@ -64,6 +167,10 @@ async function submitEdit(id: number): Promise<void> {
     editingId.value = null;
   }
 }
+
+const pageCount = computed(() =>
+  Math.max(1, Math.ceil(total.value / VOCABULARY_PAGE_SIZE)),
+);
 
 onMounted(() => {
   void store.load();
@@ -85,7 +192,7 @@ onMounted(() => {
       depth="3"
       style="display: block; margin-bottom: 12px"
     >
-      划词翻译单词时自动记录（含查询次数）；Popup 里的 ★ 只针对生词，可随时移除。
+      划词翻译单词时自动记录；点词头展开词典释义，点掌握度徽章一键切换。
     </n-text>
     <n-alert
       v-if="loadError"
@@ -96,31 +203,122 @@ onMounted(() => {
       {{ loadError }}
     </n-alert>
 
-    <!-- 筛选：固定三列，回车/变更即应用 -->
-    <div class="vocab-filter">
-      <n-input
-        v-model:value="filter.search"
-        placeholder="搜索（词 / 译文 / 笔记），回车应用"
-        clearable
-        @keydown.enter="store.applyFilters()"
-        @blur="store.applyFilters()"
-      />
-      <n-select
-        v-model:value="filter.mastery"
-        :options="[{ label: '全部掌握程度', value: '' }, ...masteryOptions]"
-        placeholder="掌握程度"
-        @update:value="store.applyFilters()"
-      />
-      <n-select
-        v-model:value="filter.tag"
-        :options="[{ label: '全部标签', value: '' }, ...tagOptions]"
-        placeholder="标签"
-        clearable
-        @update:value="store.applyFilters()"
-      />
+    <!-- 筛选：搜索 + 掌握度统计（点击即筛）+ 标签 chips -->
+    <n-input
+      v-model:value="filter.search"
+      placeholder="搜索（词 / 译文 / 笔记），回车应用"
+      clearable
+      style="margin-bottom: 10px"
+      @keydown.enter="store.applyFilters()"
+      @blur="store.applyFilters()"
+    />
+    <div class="vocab-stat-row">
+      <button
+        type="button"
+        :class="['vocab-stat', { active: filter.mastery === '' }]"
+        @click="filter.mastery = ''; store.applyFilters()"
+      >
+        全部 {{ total }}
+      </button>
+      <button
+        v-for="stat in masteryStats"
+        :key="stat.value"
+        type="button"
+        :class="['vocab-stat', `is-${stat.value}`, { active: filter.mastery === stat.value }]"
+        @click="toggleMasteryFilter(stat.value)"
+      >
+        {{ stat.label }} {{ stat.count }}
+      </button>
+    </div>
+    <div
+      v-if="tags.length > 0"
+      class="vocab-tag-row"
+    >
+      <button
+        type="button"
+        :class="['vocab-tag-chip', { active: filter.tag === '' }]"
+        @click="filter.tag = ''; store.applyFilters()"
+      >
+        全部标签
+      </button>
+      <button
+        v-for="tag in tags"
+        :key="tag"
+        type="button"
+        :class="['vocab-tag-chip', { active: filter.tag === tag }]"
+        @click="toggleTagFilter(tag)"
+      >
+        {{ tag }}
+      </button>
     </div>
 
-    <!-- 词条：分页每页 20 条，卡片三层（头/摘要/底栏），按钮固定右下 -->
+    <!-- 批量操作条 -->
+    <div
+      v-if="hasSelection"
+      class="vocab-batch-bar"
+    >
+      <n-text
+        depth="3"
+        style="flex-shrink: 0"
+      >
+        已选 {{ selectedIds.size }} 条
+      </n-text>
+      <n-select
+        v-model:value="batchMastery"
+        :options="masteryOptions"
+        placeholder="设掌握度…"
+        size="small"
+        style="width: 120px"
+        clearable
+      />
+      <n-button
+        size="small"
+        secondary
+        :disabled="!batchMastery"
+        @click="batchApplyMastery"
+      >
+        应用
+      </n-button>
+      <n-input
+        v-model:value="batchTagInput"
+        size="small"
+        placeholder="追加标签（逗号分隔）"
+        style="width: 170px"
+        @keydown.enter="batchApplyTags"
+      />
+      <n-button
+        size="small"
+        secondary
+        :disabled="!batchTagInput.trim()"
+        @click="batchApplyTags"
+      >
+        加标签
+      </n-button>
+      <n-popconfirm
+        :show-icon="false"
+        @positive-click="batchDelete"
+      >
+        <template #trigger>
+          <n-button
+            size="small"
+            type="error"
+            secondary
+          >
+            删除
+          </n-button>
+        </template>
+        删除选中的 {{ selectedIds.size }} 条生词，确定？
+      </n-popconfirm>
+      <n-button
+        size="small"
+        quaternary
+        @click="clearSelection"
+      >
+        取消
+      </n-button>
+    </div>
+
+    <!-- 词条列表 -->
     <n-list
       v-if="items.length > 0"
       :show-divider="true"
@@ -129,82 +327,9 @@ onMounted(() => {
         v-for="item in items"
         :key="item.id"
       >
-        <!-- 浏览态 -->
-        <div
-          v-if="editingId !== item.id"
-          class="vocab-item"
-        >
-          <div class="vocab-head">
-            <span class="vocab-word">{{ item.word }}</span>
-            <n-tag
-              size="small"
-              :type="masteryTagType(item.mastery)"
-              :bordered="item.mastery === 'new'"
-            >
-              {{ masteryLabel(item.mastery) }}
-            </n-tag>
-            <n-tag
-              v-for="tag in item.tags"
-              :key="tag"
-              size="small"
-              :bordered="false"
-            >
-              {{ tag }}
-            </n-tag>
-          </div>
-
-          <div class="vocab-body">
-            <p
-              v-if="item.translation"
-              class="vocab-translation clamp-2"
-              :title="item.translation"
-            >
-              {{ item.translation }}
-            </p>
-            <p
-              v-if="item.notes"
-              class="vocab-notes clamp-2"
-              :title="item.notes"
-            >
-              {{ item.notes }}
-            </p>
-          </div>
-
-          <div class="vocab-foot">
-            <span class="vocab-meta clamp-1">
-              查询 {{ item.lookupCount }} · 复习 {{ item.reviewCount }} ·
-              {{ item.lastSeenAt.slice(0, 10) }} · {{ item.source }}
-            </span>
-            <span class="vocab-actions">
-              <n-button
-                size="tiny"
-                secondary
-                @click="startEdit(item)"
-              >
-                编辑
-              </n-button>
-              <n-popconfirm
-                :show-icon="false"
-                @positive-click="store.remove(item.id)"
-              >
-                <template #trigger>
-                  <n-button
-                    size="tiny"
-                    type="error"
-                    secondary
-                  >
-                    删除
-                  </n-button>
-                </template>
-                从生词本移除该词条，确定？
-              </n-popconfirm>
-            </span>
-          </div>
-        </div>
-
         <!-- 编辑态 -->
         <n-form
-          v-else
+          v-if="editingId === item.id"
           label-placement="top"
           size="small"
           :show-feedback="false"
@@ -231,7 +356,7 @@ onMounted(() => {
                   placeholder="gre, noun"
                 />
               </n-form-item>
-              <n-form-item label="掌握程度">
+              <n-form-item label="掌握度">
                 <n-select
                   v-model:value="editForm.mastery"
                   :options="masteryOptions"
@@ -270,6 +395,111 @@ onMounted(() => {
             </n-alert>
           </n-space>
         </n-form>
+
+        <!-- 浏览态 -->
+        <div
+          v-else
+          class="vocab-item"
+        >
+          <div class="vocab-head">
+            <n-checkbox
+              :checked="selectedIds.has(item.id)"
+              @update:checked="toggleSelected(item.id, $event)"
+            />
+            <button
+              type="button"
+              class="vocab-word"
+              :title="`查看「${item.word}」的词典释义`"
+              @click="toggleCard(item)"
+            >
+              {{ item.word }}
+            </button>
+            <button
+              type="button"
+              class="vocab-mastery"
+              :class="`is-${item.mastery}`"
+              title="点击切换掌握度"
+              @click="store.cycleMastery(item)"
+            >
+              {{ masteryLabel(item.mastery) }}
+            </button>
+            <n-tag
+              v-for="tag in item.tags"
+              :key="tag"
+              size="small"
+              :bordered="false"
+            >
+              {{ tag }}
+            </n-tag>
+          </div>
+
+          <div class="vocab-body">
+            <p
+              v-if="item.translation"
+              class="vocab-translation clamp-2"
+              :title="item.translation"
+            >
+              {{ item.translation }}
+            </p>
+            <p
+              v-if="item.notes"
+              class="vocab-notes clamp-2"
+              :title="item.notes"
+            >
+              {{ item.notes }}
+            </p>
+          </div>
+
+          <!-- 词卡：多词典完整释义（富文本/发音/内链），点词头开合 -->
+          <div
+            v-if="expandedCardId === item.id"
+            class="vocab-card"
+          >
+            <n-text
+              v-if="(cardEntries[item.id] ?? []).length === 0"
+              depth="3"
+              style="font-size: 12.5px"
+            >
+              没有词典收录「{{ item.word }}」。
+            </n-text>
+            <DictionaryEntryPanel
+              v-else
+              :entries="cardEntries[item.id] ?? []"
+              @lookup-word="cardLookupWord"
+            />
+          </div>
+
+          <div class="vocab-foot">
+            <span class="vocab-meta clamp-1">
+              查询 {{ item.lookupCount }} · 复习 {{ item.reviewCount }} ·
+              {{ item.lastSeenAt.slice(0, 10) }} · {{ item.source }}
+            </span>
+            <span class="vocab-actions">
+              <n-button
+                size="tiny"
+                secondary
+                @click="startEdit(item)"
+              >
+                编辑
+              </n-button>
+              <n-popconfirm
+                :show-icon="false"
+                @positive-click="store.remove(item.id)"
+              >
+                <template #trigger>
+                  <n-button
+                    size="tiny"
+                    type="error"
+                    secondary
+                  >
+                    删除
+                  </n-button>
+                </template>
+                从生词本移除该词条，确定？
+              </n-popconfirm>
+            </span>
+          </div>
+        </div>
       </n-list-item>
     </n-list>
     <n-empty
@@ -295,20 +525,82 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* 筛选行：固定三列（搜索占半），不随窗口随机换行 */
-.vocab-filter {
-  display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
-  gap: 12px;
+/* 掌握度统计条：点击即筛 */
+.vocab-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.vocab-stat {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vocab-stat:hover {
+  color: var(--color-text);
+}
+
+.vocab-stat.active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+/* 标签 chips */
+.vocab-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-bottom: 12px;
 }
 
-/* 词条卡片：垂直三层，杜绝左右两栏挤压导致的按钮漂移 */
+.vocab-tag-chip {
+  padding: 1px 8px;
+  border-radius: 6px;
+  border: 1px dashed var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.vocab-tag-chip.active {
+  border-style: solid;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* 批量操作条 */
+.vocab-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-accent) 5%, var(--color-surface));
+}
+
+/* 词条卡片：垂直三层 + 可选中复制 */
 .vocab-item {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  user-select: text;
+}
+
+.vocab-item :deep(button) {
+  user-select: none;
 }
 
 .vocab-head {
@@ -322,7 +614,38 @@ onMounted(() => {
 .vocab-word {
   font-weight: 600;
   font-size: 15px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
   overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.vocab-word:hover {
+  color: var(--color-accent);
+}
+
+.vocab-mastery {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.vocab-mastery.is-learning {
+  border-color: #f0a020;
+  color: #f0a020;
+}
+
+.vocab-mastery.is-mastered {
+  border-color: #18a058;
+  color: #18a058;
 }
 
 .vocab-body {
@@ -345,7 +668,16 @@ onMounted(() => {
   overflow-wrap: anywhere;
 }
 
-/* 底栏：meta 单行截断在左，操作按钮整体固定右侧、永不换行 */
+/* 词卡：内嵌词典面板 */
+.vocab-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: 8px 10px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
 .vocab-foot {
   display: flex;
   align-items: center;
