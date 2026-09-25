@@ -171,26 +171,20 @@ onMounted(() => {
           />
         </n-form-item>
 
-        <n-space :size="12">
-          <n-form-item
-            label="词头语言"
-            style="flex: 1"
-          >
+        <div class="form-grid">
+          <n-form-item label="词头语言">
             <n-select
               v-model:value="form.sourceLanguage"
               :options="languageSelectOptions"
             />
           </n-form-item>
-          <n-form-item
-            label="释义语言"
-            style="flex: 1"
-          >
+          <n-form-item label="释义语言">
             <n-select
               v-model:value="form.glossLanguage"
               :options="languageSelectOptions"
             />
           </n-form-item>
-        </n-space>
+        </div>
 
         <n-form-item label="词典文件路径">
           <n-input-group>

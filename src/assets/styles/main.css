@@ -157,6 +157,53 @@ body {
   color: var(--color-text-secondary);
 }
 
+/* ---------- 表单与列表排版 ---------- */
+
+/* 设置类表单：固定两列栅格（不换行、同行等宽），
+   取代 n-space 的自动换行——那是表单错乱的根源。 */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.form-grid > .span-2 {
+  grid-column: 1 / -1;
+}
+
+.form-grid .n-form-item {
+  grid-row: span 1;
+}
+
+/* 表单小节标题：分组之间给视觉呼吸 */
+.form-section-title {
+  margin: 10px 0 -2px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.form-section-title:first-child {
+  margin-top: 0;
+}
+
+/* 列表摘要截断：长释义/笔记不再撑爆列表行高 */
+.clamp-1,
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.clamp-1 {
+  -webkit-line-clamp: 1;
+}
+
+.clamp-2 {
+  -webkit-line-clamp: 2;
+}
+
 .view-note {
   margin: 0 0 10px;
   font-size: 13px;

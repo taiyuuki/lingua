@@ -182,87 +182,64 @@ function testResultText(id: string): string {
       size="small"
       :show-feedback="false"
     >
-      <n-space
-        vertical
-        :size="12"
-      >
-        <n-space :size="12">
-          <n-form-item
-            label="ID（英文标识，保存后不可改）"
-            style="flex: 1"
-          >
-            <n-input
-              v-model:value="form.id"
-              placeholder="deepseek / local-ollama"
-              :disabled="!form.isNew"
-              style="width: 100%"
-            />
-          </n-form-item>
-          <n-form-item
-            label="名称"
-            style="flex: 1"
-          >
-            <n-input
-              v-model:value="form.name"
-              placeholder="DeepSeek"
-            />
-          </n-form-item>
-        </n-space>
-
-        <n-form-item label="接口地址（baseUrl）">
+      <div class="form-grid">
+        <n-form-item label="ID（英文标识，保存后不可改）">
+          <n-input
+            v-model:value="form.id"
+            placeholder="deepseek / local-ollama"
+            :disabled="!form.isNew"
+          />
+        </n-form-item>
+        <n-form-item label="名称">
+          <n-input
+            v-model:value="form.name"
+            placeholder="DeepSeek"
+          />
+        </n-form-item>
+        <n-form-item
+          label="接口地址（baseUrl）"
+          class="span-2"
+        >
           <n-input
             v-model:value="form.baseUrl"
             placeholder="https://api.deepseek.com/v1 或 http://localhost:11434/v1"
           />
         </n-form-item>
-
-        <n-space :size="12">
-          <n-form-item
-            label="模型"
-            style="flex: 1"
-          >
-            <n-input
-              v-model:value="form.model"
-              placeholder="deepseek-chat / qwen2.5:7b …"
-            />
-          </n-form-item>
-          <n-form-item
-            label="API Key"
-            style="flex: 1"
-          >
-            <n-input
-              v-model:value="form.apiKeyInput"
-              type="password"
-              show-password-on="click"
-              placeholder="留空表示不修改"
-            />
-          </n-form-item>
-        </n-space>
-
-        <n-space :size="12">
-          <n-form-item
-            label="超时"
-            style="flex: 1"
-          >
-            <n-select
-              v-model:value="form.timeoutSecs"
-              :options="timeoutOptions"
-            />
-          </n-form-item>
-          <n-form-item
-            label="厂商扩展参数（JSON 对象，逐键合并进请求体）"
-            style="flex: 2"
-          >
-            <n-input
-              v-model:value="form.extraBody"
-              type="textarea"
-              :rows="2"
-              placeholder="{&quot;thinking&quot;:{&quot;type&quot;:&quot;disabled&quot;}}（智谱 GLM 关闭深度思考，翻译类任务建议配置）"
-            />
-          </n-form-item>
-        </n-space>
-
-        <n-form-item label="能力（截图翻译的 Vision 兜底只派给开启「视觉」的 Provider）">
+        <n-form-item label="模型">
+          <n-input
+            v-model:value="form.model"
+            placeholder="deepseek-chat / qwen2.5:7b …"
+          />
+        </n-form-item>
+        <n-form-item label="API Key">
+          <n-input
+            v-model:value="form.apiKeyInput"
+            type="password"
+            show-password-on="click"
+            placeholder="留空表示不修改"
+          />
+        </n-form-item>
+        <n-form-item label="超时">
+          <n-select
+            v-model:value="form.timeoutSecs"
+            :options="timeoutOptions"
+          />
+        </n-form-item>
+        <n-form-item
+          label="厂商扩展参数（JSON，逐键合并进请求体）"
+          class="span-2"
+        >
+          <n-input
+            v-model:value="form.extraBody"
+            type="textarea"
+            :rows="2"
+            placeholder="{&quot;thinking&quot;:{&quot;type&quot;:&quot;disabled&quot;}}（智谱 GLM 关闭深度思考，翻译类任务建议配置）"
+          />
+        </n-form-item>
+        <n-form-item
+          label="能力（Vision 兜底只派给开启「视觉」的 Provider）"
+          class="span-2"
+        >
           <n-space :size="16">
             <n-checkbox v-model:checked="form.canChat">
               对话
@@ -275,30 +252,31 @@ function testResultText(id: string): string {
             </n-checkbox>
           </n-space>
         </n-form-item>
+      </div>
 
-        <n-space>
-          <n-button
-            type="primary"
-            :loading="saving"
-            @click="store.save()"
-          >
-            保存
-          </n-button>
-          <n-button
-            secondary
-            @click="store.closeForm()"
-          >
-            取消
-          </n-button>
-        </n-space>
-        <n-alert
-          v-if="saveError"
-          type="error"
-          :show-icon="true"
+      <n-space style="margin-top: 16px">
+        <n-button
+          type="primary"
+          :loading="saving"
+          @click="store.save()"
         >
-          {{ saveError }}
-        </n-alert>
+          保存
+        </n-button>
+        <n-button
+          secondary
+          @click="store.closeForm()"
+        >
+          取消
+        </n-button>
       </n-space>
+      <n-alert
+        v-if="saveError"
+        type="error"
+        :show-icon="true"
+        style="margin-top: 12px"
+      >
+        {{ saveError }}
+      </n-alert>
     </n-form>
   </n-card>
 </template>

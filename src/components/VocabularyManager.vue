@@ -93,14 +93,10 @@ onMounted(() => {
     </n-alert>
 
     <!-- 筛选 -->
-    <n-space
-      :size="12"
-      style="margin-bottom: 12px"
-    >
+    <div class="vocab-filter">
       <n-input
         v-model:value="filter.search"
         placeholder="搜索（词 / 译文 / 笔记），回车应用"
-        style="flex: 2"
         clearable
         @keydown.enter="applyFilters"
         @blur="applyFilters"
@@ -109,18 +105,16 @@ onMounted(() => {
         v-model:value="filter.mastery"
         :options="[{ label: '全部掌握程度', value: '' }, ...MASTERY_OPTIONS.map((option) => ({ label: option.label, value: option.value }))]"
         placeholder="掌握程度"
-        style="flex: 1"
         @update:value="applyFilters"
       />
       <n-select
         v-model:value="filter.tag"
         :options="[{ label: '全部标签', value: '' }, ...tagOptions]"
         placeholder="标签"
-        style="flex: 1"
         clearable
         @update:value="applyFilters"
       />
-    </n-space>
+    </div>
 
     <!-- 词条列表 -->
     <n-list
@@ -166,23 +160,24 @@ onMounted(() => {
               </n-space>
               <n-text
                 v-if="item.translation"
-                class="row-detail"
-                style="display: block; font-size: 13.5px"
+                class="row-detail clamp-2"
+                style="font-size: 13.5px"
+                :title="item.translation"
               >
                 {{ item.translation }}
               </n-text>
               <n-text
                 v-if="item.notes"
                 depth="3"
-                class="row-detail"
-                style="display: block"
+                class="row-detail clamp-2"
+                :title="item.notes"
               >
                 {{ item.notes }}
               </n-text>
               <n-text
                 depth="3"
                 class="row-detail"
-                style="display: block; font-size: 11.5px"
+                style="font-size: 11.5px"
               >
                 查询 {{ item.lookupCount }} · 复习 {{ item.reviewCount }} ·
                 {{ item.lastSeenAt.slice(0, 10) }} · {{ item.source }}
@@ -237,30 +232,26 @@ onMounted(() => {
                 placeholder="这个词对你的意义、联想、易错点…"
               />
             </n-form-item>
-            <n-space :size="12">
-              <n-form-item
-                label="标签（逗号分隔）"
-                style="flex: 1"
-              >
+            <div class="form-grid">
+              <n-form-item label="标签（逗号分隔）">
                 <n-input
                   v-model:value="editForm.tags"
                   placeholder="gre, noun"
                 />
               </n-form-item>
-              <n-form-item
-                label="掌握程度"
-                style="flex: 1"
-              >
+              <n-form-item label="掌握程度">
                 <n-select
                   v-model:value="editForm.mastery"
                   :options="masteryOptions"
                 />
               </n-form-item>
-            </n-space>
+            </div>
             <n-text
               v-if="item.examples.length > 0"
               depth="3"
+              class="clamp-2"
               style="font-size: 12px"
+              :title="item.examples.join('\n')"
             >
               例句：{{ item.examples.join(" / ") }}
             </n-text>
@@ -296,3 +287,23 @@ onMounted(() => {
     />
   </n-card>
 </template>
+
+<style scoped>
+/* 筛选行：固定三列（搜索占半），不再随窗口随机换行 */
+.vocab-filter {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.row-main {
+  min-width: 0;
+}
+
+.row-detail {
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+}
+</style>

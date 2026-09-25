@@ -97,12 +97,6 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
     title="设置"
     size="small"
   >
-    <n-text
-      depth="3"
-      style="display: block; margin-bottom: 12px"
-    >
-      不同任务可以走不同 Provider；未单独配置的任务使用默认 Provider。
-    </n-text>
     <n-alert
       v-if="settingsStore.loadError"
       type="error"
@@ -117,143 +111,129 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
       size="small"
       :show-feedback="false"
     >
-      <n-space
-        vertical
-        :size="12"
+      <p class="form-section-title">
+        通用
+      </p>
+      <div class="form-grid">
+        <n-form-item label="界面主题">
+          <n-select
+            v-model:value="uiTheme"
+            :options="themeOptions"
+          />
+        </n-form-item>
+        <n-form-item label="目标语言（划词翻译译入语）">
+          <n-select
+            v-model:value="targetLanguage"
+            :options="languageOptions"
+          />
+        </n-form-item>
+        <n-form-item label="开机自启">
+          <n-switch
+            :value="autostart"
+            @update:value="onAutostartChange"
+          />
+        </n-form-item>
+        <n-form-item label="划词快捷键">
+          <n-input
+            v-model:value="shortcut"
+            placeholder="alt+t"
+          />
+        </n-form-item>
+        <n-form-item label="截图快捷键">
+          <n-input
+            v-model:value="ocrShortcut"
+            placeholder="alt+s（截光标所在屏幕）"
+          />
+        </n-form-item>
+      </div>
+
+      <p class="form-section-title">
+        AI 路由
+      </p>
+      <n-text
+        depth="3"
+        style="display: block; margin-bottom: 10px; font-size: 12px"
       >
-        <n-space :size="12">
-          <n-form-item
-            label="界面主题"
-            style="flex: 1"
-          >
-            <n-select
-              v-model:value="uiTheme"
-              :options="themeOptions"
-            />
-          </n-form-item>
-          <n-form-item
-            label="默认 Provider"
-            style="flex: 1"
-          >
-            <n-select
-              v-model:value="defaultProviderId"
-              :options="[{ label: '未设置', value: '' }, ...providerOptions]"
-              clearable
-            />
-          </n-form-item>
-          <n-form-item
-            label="翻译任务 Provider"
-            style="flex: 1"
-          >
-            <n-select
-              v-model:value="translateProviderId"
-              :options="[{ label: '跟随默认', value: '' }, ...providerOptions]"
-              clearable
-            />
-          </n-form-item>
-          <n-form-item
-            label="视觉识别 Provider（OCR 兜底）"
-            style="flex: 1"
-          >
-            <n-select
-              v-model:value="visionProviderId"
-              :options="[{ label: '自动（任一视觉能力 Provider）', value: '' }, ...visionProviderOptions]"
-              clearable
-            />
-          </n-form-item>
-        </n-space>
-
-        <n-space :size="12">
-          <n-form-item
-            label="目标语言"
-            style="flex: 1"
-          >
-            <n-select
-              v-model:value="targetLanguage"
-              :options="languageOptions"
-            />
-          </n-form-item>
-          <n-form-item
-            label="划词快捷键"
-            style="flex: 1"
-          >
-            <n-input
-              v-model:value="shortcut"
-              placeholder="alt+t"
-            />
-          </n-form-item>
-          <n-form-item
-            label="截图快捷键（截光标所在屏幕）"
-            style="flex: 1"
-          >
-            <n-input
-              v-model:value="ocrShortcut"
-              placeholder="alt+s"
-            />
-          </n-form-item>
-          <n-form-item
-            label="开机自启"
-            style="flex: 1"
-          >
-            <n-space align="center">
-              <n-switch
-                :value="autostart"
-                @update:value="onAutostartChange"
-              />
-            </n-space>
-          </n-form-item>
-        </n-space>
-
-        <n-space :size="12">
-          <n-form-item
-            label="OCR 引擎"
-            style="flex: 1"
-          >
-            <n-select
-              v-model:value="ocrProvider"
-              :options="ocrProviderOptions"
-            />
-          </n-form-item>
-          <n-form-item
-            :label="ocrProvider === 'http' ? 'OCR 服务地址（PaddleOCR sidecar 契约）' : 'tesseract 路径（macOS: brew install tesseract；Windows: winget install UB-Mannheim.TesseractOCR）'"
-            style="flex: 2"
-          >
-            <n-input
-              v-if="ocrProvider === 'tesseract'"
-              v-model:value="ocrTesseractPath"
-              placeholder="tesseract"
-            />
-            <n-input
-              v-else
-              v-model:value="ocrHttpUrl"
-              placeholder="http://127.0.0.1:8433/ocr"
-            />
-          </n-form-item>
-        </n-space>
-
-        <n-space align="center">
-          <n-button
-            type="primary"
-            :loading="saving"
-            @click="settingsStore.save()"
-          >
-            保存设置
-          </n-button>
-          <n-text
-            v-if="saveMessage"
-            type="success"
-          >
-            {{ saveMessage }}
-          </n-text>
-        </n-space>
-        <n-alert
-          v-if="saveError"
-          type="error"
-          :show-icon="true"
+        不同任务可以走不同 Provider；未单独配置的任务使用默认 Provider。
+        截图识别的 Vision 兜底只派给开启「视觉」能力的 Provider。
+      </n-text>
+      <div class="form-grid">
+        <n-form-item label="默认 Provider">
+          <n-select
+            v-model:value="defaultProviderId"
+            :options="[{ label: '未设置', value: '' }, ...providerOptions]"
+            clearable
+          />
+        </n-form-item>
+        <n-form-item label="翻译任务">
+          <n-select
+            v-model:value="translateProviderId"
+            :options="[{ label: '跟随默认', value: '' }, ...providerOptions]"
+            clearable
+          />
+        </n-form-item>
+        <n-form-item
+          label="视觉识别（OCR 兜底）"
+          class="span-2"
         >
-          {{ saveError }}
-        </n-alert>
+          <n-select
+            v-model:value="visionProviderId"
+            :options="[{ label: '自动（任一视觉能力 Provider）', value: '' }, ...visionProviderOptions]"
+            clearable
+          />
+        </n-form-item>
+      </div>
+
+      <p class="form-section-title">
+        OCR
+      </p>
+      <div class="form-grid">
+        <n-form-item label="识别引擎">
+          <n-select
+            v-model:value="ocrProvider"
+            :options="ocrProviderOptions"
+          />
+        </n-form-item>
+        <n-form-item :label="ocrProvider === 'http' ? '服务地址' : 'tesseract 路径'">
+          <n-input
+            v-if="ocrProvider === 'tesseract'"
+            v-model:value="ocrTesseractPath"
+            placeholder="tesseract（Windows: winget install UB-Mannheim.TesseractOCR）"
+          />
+          <n-input
+            v-else
+            v-model:value="ocrHttpUrl"
+            placeholder="http://127.0.0.1:8433/ocr（PaddleOCR sidecar 契约）"
+          />
+        </n-form-item>
+      </div>
+
+      <n-space
+        align="center"
+        style="margin-top: 16px"
+      >
+        <n-button
+          type="primary"
+          :loading="saving"
+          @click="settingsStore.save()"
+        >
+          保存设置
+        </n-button>
+        <n-text
+          v-if="saveMessage"
+          type="success"
+        >
+          {{ saveMessage }}
+        </n-text>
       </n-space>
+      <n-alert
+        v-if="saveError"
+        type="error"
+        :show-icon="true"
+        style="margin-top: 12px"
+      >
+        {{ saveError }}
+      </n-alert>
     </n-form>
   </n-card>
 </template>
