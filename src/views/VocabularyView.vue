@@ -7,7 +7,7 @@ import VocabularyManager from "../components/VocabularyManager.vue";
     <header class="view-header">
       <h1>生词本</h1>
       <p class="view-subtitle">
-        查过的生词自动记录；笔记 / 标签 / 掌握程度随你标注
+        记下查过的生词，用笔记、标签和掌握度整理复习
       </p>
     </header>
     <VocabularyManager />

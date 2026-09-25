@@ -8,7 +8,7 @@ import WordLookup from "../components/WordLookup.vue";
     <header class="view-header">
       <h1>词典</h1>
       <p class="view-subtitle">
-        本地词典：翻译单词时词典优先，命中直接出结果
+        导入本地词典，查单词优先显示词典释义
       </p>
     </header>
     <WordLookup />

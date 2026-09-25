@@ -168,7 +168,7 @@ const ocrSourceLabel = computed(() => {
   const parts: string[] = [];
   if (source.engine.startsWith("vision:")) {
     parts.push(
-      source.via === "manual" ? "Vision 手动重识" : "Vision 自动兜底",
+      source.via === "manual" ? "AI 重新识别" : "AI 自动识别",
     );
   } else {
     parts.push(source.engine);
@@ -291,7 +291,7 @@ function onToolbarMouseDown(event: MouseEvent): void {
           v-if="visionRetryAvailable"
           class="tool-btn"
           type="button"
-          title="用 Vision 重新识别（tesseract 识别不对时）"
+          title="识别不准确时，用 AI 重新识别"
           @click="retryWithVision"
         >
           <svg

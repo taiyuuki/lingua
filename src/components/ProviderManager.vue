@@ -53,7 +53,7 @@ function testResultText(id: string): string {
 
 <template>
   <n-card
-    title="AI Providers"
+    title="AI 服务"
     size="small"
   >
     <template #header-extra>
@@ -71,8 +71,8 @@ function testResultText(id: string): string {
       depth="3"
       style="display: block; margin-bottom: 12px"
     >
-      兼容 OpenAI 协议的服务均可接入（OpenAI / DeepSeek / 本地 Ollama、LM Studio
-      等）。API Key 保存在系统钥匙串中，不会写入数据库。
+      支持接入 OpenAI 兼容的服务（OpenAI / DeepSeek / 本地 Ollama、LM Studio
+      等），API Key 保存在系统钥匙串中。
     </n-text>
     <n-alert
       v-if="loadError"
@@ -163,7 +163,7 @@ function testResultText(id: string): string {
                   删除
                 </n-button>
               </template>
-              删除后该 Provider 的 API Key 也会从钥匙串清除，确定？
+              删除后该服务的 API Key 也会一并删除，确定？
             </n-popconfirm>
           </n-space>
         </div>
@@ -171,7 +171,7 @@ function testResultText(id: string): string {
     </n-list>
     <n-empty
       v-else-if="!form.open"
-      description="还没有 Provider，点击「添加」配置第一个（例如本地 Ollama：http://localhost:11434/v1）"
+      description="还没有添加服务。点击右上角「添加」开始，例如本地 Ollama（http://localhost:11434/v1）"
       style="margin: 12px 0"
     />
 
@@ -197,7 +197,7 @@ function testResultText(id: string): string {
           />
         </n-form-item>
         <n-form-item
-          label="接口地址（baseUrl）"
+          label="接口地址"
           class="span-2"
         >
           <n-input
@@ -226,18 +226,18 @@ function testResultText(id: string): string {
           />
         </n-form-item>
         <n-form-item
-          label="厂商扩展参数（JSON，逐键合并进请求体）"
+          label="高级参数（JSON，可选）"
           class="span-2"
         >
           <n-input
             v-model:value="form.extraBody"
             type="textarea"
             :rows="2"
-            placeholder="{&quot;thinking&quot;:{&quot;type&quot;:&quot;disabled&quot;}}（智谱 GLM 关闭深度思考，翻译类任务建议配置）"
+            placeholder="{&quot;thinking&quot;:{&quot;type&quot;:&quot;disabled&quot;}}（例：智谱 GLM 关闭深度思考）"
           />
         </n-form-item>
         <n-form-item
-          label="能力（Vision 兜底只派给开启「视觉」的 Provider）"
+          label="能力"
           class="span-2"
         >
           <n-space :size="16">

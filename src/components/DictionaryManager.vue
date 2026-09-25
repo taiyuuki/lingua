@@ -95,8 +95,8 @@ onMounted(() => {
       depth="3"
       style="display: block; margin-bottom: 12px"
     >
-      本地词典优先：翻译单词时命中词典则直接出结果（快、离线、零成本），未命中才走
-      AI。
+      导入本地词典后，查单词优先显示词典释义；没有收录的词再由 AI
+      翻译。
     </n-text>
     <n-alert
       v-if="loadError"
@@ -149,7 +149,7 @@ onMounted(() => {
     </n-list>
     <n-empty
       v-else-if="!form.open"
-      description="还没有导入词典。可以把 CC-CEDICT / ECDICT 等公开词典转成 TSV 后导入。"
+      description="还没有词典。支持导入 TSV / MDX 词典文件（如 CC-CEDICT、ECDICT）。"
       style="margin: 12px 0"
     />
 

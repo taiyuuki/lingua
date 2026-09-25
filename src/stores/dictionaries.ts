@@ -25,11 +25,10 @@ lemma	发音	词性	释义	例句1 / 例句2	同义词1 / 同义词2	反义词
 后三列可省略；同一 lemma 多行会合并为一个词条。`;
 
 export const MDX_FORMAT_HINT = `MDX（MDict）词库：
-· 无加密与固定密钥加密（Encrypted=2，含多数牛津词库）均可导入；
-· 释义按富文本渲染：同目录同名 .mdd 的 CSS/图片会一并导入；
-· 早期导入的词库无富文本，删除后重新导入即可；
-· 绑定用户注册信息的加密（Encrypted 含 1）无法离线解密，不支持；
-· 大词库分批写入并显示进度，导入中请勿关闭应用。`;
+· 常见的 MDX 词典均可导入（含多数牛津词库）；
+· 把同名 .mdd 文件放在 .mdx 旁边，释义可完整显示图片与排版；
+· 少数加密词典暂不支持导入；
+· 大词库导入需要一些时间，导入过程中请勿关闭应用。`;
 
 /** 是否按 MDX 词库导入（按扩展名分发）。 */
 export function isMdxPath(path: string): boolean {
@@ -129,9 +128,8 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
         (result.skippedLines > 0 ? `，跳过 ${result.skippedLines} 条` : "");
       if (result.resourcesMissing) {
         importWarning.value =
-          "该词典的释义引用了 CSS/图片资源，但同目录没有配对的 .mdd，" +
-          "释义将以基础排版显示（图片缺失）。把对应的 .mdd 放到 .mdx " +
-          "旁边后删除重导，即可获得完整排版。";
+          "该词典缺少配对的 .mdd 资源文件，释义中的图片无法显示。" +
+          "把 .mdd 放到 .mdx 同一目录后，删除并重新导入即可。";
       }
       await load();
     } catch (error) {

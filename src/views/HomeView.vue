@@ -6,7 +6,7 @@ import { useSettingsStore } from "../stores/settings";
 import { screenRecordingStatus, startOcrCapture } from "../lib/api";
 
 const appStore = useAppStore();
-const { appInfo, database, errorMessage } = storeToRefs(appStore);
+const { appInfo, errorMessage } = storeToRefs(appStore);
 
 const settings = useSettingsStore();
 const { shortcut, permissionGranted } = storeToRefs(settings);
@@ -59,14 +59,14 @@ onMounted(() => {
         >
           {{ shortcut || "alt+t" }}
         </n-tag>
-        ，翻译结果会在屏幕中央的 Popup 中显示；按
+        ，翻译结果会显示在屏幕中央的弹窗中；按
         <n-tag
           size="small"
           :bordered="true"
         >
           Esc
         </n-tag>
-        或点击窗口外部关闭。
+        或点击窗口外部即可关闭。
       </p>
       <n-alert
         v-if="permissionGranted === false"
@@ -90,8 +90,7 @@ onMounted(() => {
       size="small"
     >
       <p class="view-note">
-        框选屏幕任意区域，识别出的文字自动走 AI
-        翻译并在 Popup 中显示。OCR 引擎在「设置」页配置；截图不落盘。
+        框选屏幕任意区域，识别出的文字会自动翻译并弹出显示。识别引擎可在「设置」中调整，截图不会被保存。
       </p>
       <n-button
         type="primary"
@@ -120,9 +119,6 @@ onMounted(() => {
       >
         <n-descriptions-item label="应用">
           {{ appInfo ? `${appInfo.name} v${appInfo.version}（${appInfo.os}/${appInfo.arch}）` : "—" }}
-        </n-descriptions-item>
-        <n-descriptions-item label="数据库">
-          {{ database ? `schema v${database.schemaVersion} · ${database.migrationsTotal} 个 migration` : "—" }}
         </n-descriptions-item>
       </n-descriptions>
     </n-card>

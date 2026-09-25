@@ -62,8 +62,8 @@ const languageOptions = SUPPORTED_TARGET_LANGUAGES.map((lang) => ({
 }));
 
 const ocrProviderOptions = [
-  { label: '本机 tesseract CLI', value: 'tesseract' },
-  { label: '本地 OCR HTTP 服务', value: 'http' },
+  { label: 'Tesseract（本机）', value: 'tesseract' },
+  { label: '本地 HTTP 服务', value: 'http' },
 ];
 
 onMounted(() => {
@@ -152,17 +152,16 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
       </div>
 
       <p class="form-section-title">
-        AI 路由
+        AI 任务分配
       </p>
       <n-text
         depth="3"
         style="display: block; margin-bottom: 10px; font-size: 12px"
       >
-        不同任务可以走不同 Provider；未单独配置的任务使用默认 Provider。
-        截图识别的 Vision 兜底只派给开启「视觉」能力的 Provider。
+        可为不同任务指定不同的服务；未单独设置的任务会使用默认服务。
       </n-text>
       <div class="form-grid">
-        <n-form-item label="默认 Provider">
+        <n-form-item label="默认服务">
           <n-select
             v-model:value="defaultProviderId"
             :options="[{ label: '未设置', value: '' }, ...providerOptions]"
@@ -177,12 +176,12 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
           />
         </n-form-item>
         <n-form-item
-          label="视觉识别（OCR 兜底）"
+          label="视觉识别"
           class="span-2"
         >
           <n-select
             v-model:value="visionProviderId"
-            :options="[{ label: '自动（任一视觉能力 Provider）', value: '' }, ...visionProviderOptions]"
+            :options="[{ label: '自动', value: '' }, ...visionProviderOptions]"
             clearable
           />
         </n-form-item>
@@ -207,7 +206,7 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
           <n-input
             v-else
             v-model:value="ocrHttpUrl"
-            placeholder="http://127.0.0.1:8433/ocr（PaddleOCR sidecar 契约）"
+            placeholder="http://127.0.0.1:8433/ocr"
           />
         </n-form-item>
       </div>
