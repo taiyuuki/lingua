@@ -1,41 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
+import Sortable from "sortablejs";
 import {
   NAlert,
   NButton,
   NCard,
   NEmpty,
-  NForm,
-  NFormItem,
-  NInput,
-  NInputGroup,
-  NList,
-  NListItem,
   NPopconfirm,
-  NProgress,
-  NSelect,
-  NSpace,
   NSpin,
   NText,
 } from "naive-ui";
-import {
-  MDX_FORMAT_HINT,
-  TSV_FORMAT_HINT,
-  isMdxPath,
-  useDictionariesStore,
-} from "../stores/dictionaries";
-import { SUPPORTED_LANGUAGES } from "../stores/settings";
-import { pickDictionaryFilePath } from "../lib/api";
+import { useDictionariesStore } from "../stores/dictionaries";
 
+/** 词典列表卡片（词典管理页）：拖拽排序 + 删除 + 后台导入进度横条。 */
 const store = useDictionariesStore();
 const {
   dictionaries,
   loading,
   loadError,
-  importError,
-  importMessage,
-  importWarning,
   importing,
   cancelling,
   importProgress,
@@ -43,56 +27,65 @@ const {
   form,
 } = storeToRefs(store);
 
+const router = useRouter();
+
 /** 导入中横条显示的词典名。 */
 const importName = computed(() => form.value.name || form.value.path || "词典");
 
-const languageSelectOptions = computed(() =>
-  SUPPORTED_LANGUAGES.map((lang) => ({
-    label: `${lang.label}（${lang.code}）`,
-    value: lang.code,
-  })),
-);
-
-/** 选中的是 MDX 词库时切换格式提示与导入命令。 */
-const isMdxFile = computed(() => isMdxPath(form.value.path));
-const formatHint = computed(() => (isMdxFile.value ? MDX_FORMAT_HINT : TSV_FORMAT_HINT));
-const importPercentage = computed(() => {
-  const progress = importProgress.value;
-  if (!progress || progress.total === 0) {
-    return 0;
-  }
-  return Math.round((progress.imported / progress.total) * 100);
-});
-
-/** 文件选择框选词典文件：填路径，名称为空/仍是自动值时用文件名填入。 */
-async function browseDictionaryFile(): Promise<void> {
-  try {
-    const path = await pickDictionaryFilePath();
-    if (path) {
-      store.setPickedPath(path);
-    }
-  } catch {
-    // 选择器不可用时静默：手输路径的旧路径仍然可用。
-  }
-}
+const listEl = ref<HTMLElement | null>(null);
+let sortable: Sortable | null = null;
 
 onMounted(() => {
   void store.load();
+  if (listEl.value) {
+    sortable = new Sortable(listEl.value, {
+      handle: ".dict-drag-handle",
+      animation: 150,
+      // Tauri 窗口级的文件拖放拦截会吞掉 WebView 的 HTML5 拖拽事件，
+      // 必须启用鼠标事件兜底模式，拖动才能在桌面端生效。
+      forceFallback: true,
+      fallbackOnBody: true,
+      fallbackClass: "dict-row-dragging",
+      fallbackTolerance: 3,
+      onEnd(event) {
+        const { oldIndex, newIndex, item, from } = event;
+        if (oldIndex == null || newIndex == null || oldIndex === newIndex) {
+          return;
+        }
+        // Sortable 直接搬动了 DOM：先把节点放回原位再改数据，
+        // 让 Vue 按 v-for 的数据顺序接管渲染，避免 DOM 与 vdom 失配。
+        const anchor = (newIndex > oldIndex
+          ? from.children[oldIndex]
+          : from.children[oldIndex + 1]) ?? null;
+        from.insertBefore(item, anchor);
+        const next = [...dictionaries.value];
+        const [moved] = next.splice(oldIndex, 1);
+        if (!moved) {
+          return;
+        }
+        next.splice(newIndex, 0, moved);
+        void store.applyOrder(next);
+      },
+    });
+  }
 });
 
+onBeforeUnmount(() => {
+  sortable?.destroy();
+  sortable = null;
+});
 </script>
 
 <template>
   <n-card
-    title="词典"
+    title="词典列表"
     size="small"
   >
     <template #header-extra>
       <n-button
-        v-if="!form.open"
         size="small"
         type="primary"
-        @click="store.openImport()"
+        @click="router.push({ name: 'dictionary-import' })"
       >
         导入词典
       </n-button>
@@ -103,8 +96,7 @@ onMounted(() => {
       depth="3"
       style="display: block; margin-bottom: 12px"
     >
-      导入本地词典后，查单词优先显示词典释义；没有收录的词再由 AI
-      翻译。
+      拖动行首手柄调整顺序；查词与划词弹窗按此顺序依次命中释义。
     </n-text>
     <n-alert
       v-if="loadError"
@@ -126,9 +118,9 @@ onMounted(() => {
       </n-text>
     </div>
 
-    <!-- 后台导入中横条（从导入表单返回列表后仍可见） -->
+    <!-- 后台导入中横条（导入页点「后台继续，返回列表」后仍可见） -->
     <n-alert
-      v-if="importing && !form.open"
+      v-if="importing && !loading"
       type="info"
       :show-icon="false"
       style="margin-bottom: 12px"
@@ -156,223 +148,155 @@ onMounted(() => {
       </div>
     </n-alert>
 
-    <!-- 词典列表 -->
-    <n-list
-      v-if="dictionaries.length > 0 && !form.open && !loading"
-      :show-divider="true"
+    <!-- 词典列表：手柄拖拽调序（查询命中顺序随之变化）。
+         容器常驻渲染（Sortable 在 onMounted 绑定一次，行由 v-for 动态填充）。 -->
+    <div
+      ref="listEl"
+      class="dict-list"
     >
-      <n-list-item
-        v-for="(dictionary, index) in dictionaries"
+      <div
+        v-for="dictionary in dictionaries"
         :key="dictionary.id"
+        class="dict-row"
       >
-        <div class="row">
-          <div class="row-main">
-            <n-text strong>
-              {{ dictionary.name }}
-            </n-text>
-            <n-text
-              depth="3"
-              class="row-detail"
-            >
-              {{ dictionary.sourceLanguage }} → {{ dictionary.glossLanguage }} ·
-              {{ dictionary.entryCount }} 个词条
-            </n-text>
-          </div>
-          <n-space
-            :size="4"
-            align="center"
+        <div
+          class="dict-drag-handle"
+          title="拖动调整顺序（查询时优先命中）"
+        >
+          <svg
+            viewBox="0 0 10 16"
+            fill="currentColor"
+            aria-hidden="true"
           >
-            <!-- 调序：查询命中顺序（弹窗 chips / 候选）按此排列 -->
-            <n-button
-              size="tiny"
-              quaternary
-              :disabled="index === 0"
-              title="上移（查询时优先命中）"
-              @click="store.move(dictionary.id, -1)"
-            >
-              ↑
-            </n-button>
-            <n-button
-              size="tiny"
-              quaternary
-              :disabled="index === dictionaries.length - 1"
-              title="下移"
-              @click="store.move(dictionary.id, 1)"
-            >
-              ↓
-            </n-button>
-            <n-popconfirm
-              :show-icon="false"
-              :disabled="deletingId !== null"
-              @positive-click="store.remove(dictionary.id)"
-            >
-              <template #trigger>
-                <n-button
-                  size="small"
-                  type="error"
-                  secondary
-                  :loading="deletingId === dictionary.id"
-                  :disabled="deletingId !== null && deletingId !== dictionary.id"
-                >
-                  删除
-                </n-button>
-              </template>
-              全部词条数据将被移除（大词典需要几秒），确定？
-            </n-popconfirm>
-          </n-space>
+            <circle
+              cx="3"
+              cy="3"
+              r="1.5"
+            />
+            <circle
+              cx="7"
+              cy="3"
+              r="1.5"
+            />
+            <circle
+              cx="3"
+              cy="8"
+              r="1.5"
+            />
+            <circle
+              cx="7"
+              cy="8"
+              r="1.5"
+            />
+            <circle
+              cx="3"
+              cy="13"
+              r="1.5"
+            />
+            <circle
+              cx="7"
+              cy="13"
+              r="1.5"
+            />
+          </svg>
         </div>
-      </n-list-item>
-    </n-list>
+        <div class="dict-row-main">
+          <n-text strong>
+            {{ dictionary.name }}
+          </n-text>
+          <n-text
+            depth="3"
+            class="dict-row-detail"
+          >
+            {{ dictionary.sourceLanguage }} → {{ dictionary.glossLanguage }} ·
+            {{ dictionary.entryCount }} 个词条
+          </n-text>
+        </div>
+        <n-popconfirm
+          :show-icon="false"
+          :disabled="deletingId !== null"
+          @positive-click="store.remove(dictionary.id)"
+        >
+          <template #trigger>
+            <n-button
+              size="small"
+              type="error"
+              secondary
+              :loading="deletingId === dictionary.id"
+              :disabled="deletingId !== null && deletingId !== dictionary.id"
+            >
+              删除
+            </n-button>
+          </template>
+          全部词条数据将被移除（大词典需要几秒），确定？
+        </n-popconfirm>
+      </div>
+    </div>
     <n-empty
-      v-else-if="!form.open && !loading"
+      v-if="dictionaries.length === 0 && !loading"
       description="还没有词典。支持导入 TSV / MDX 词典文件（如 CC-CEDICT、ECDICT）。"
       style="margin: 12px 0"
     />
-
-    <!-- 导入表单 -->
-    <n-form
-      v-if="form.open"
-      label-placement="top"
-      size="small"
-      :show-feedback="false"
-    >
-      <n-space
-        vertical
-        :size="12"
-      >
-        <n-form-item label="名称">
-          <n-input
-            v-model:value="form.name"
-            placeholder="选文件后自动填入，可手动修改"
-          />
-        </n-form-item>
-
-        <div class="form-grid">
-          <n-form-item label="词头语言">
-            <n-select
-              v-model:value="form.sourceLanguage"
-              :options="languageSelectOptions"
-            />
-          </n-form-item>
-          <n-form-item label="释义语言">
-            <n-select
-              v-model:value="form.glossLanguage"
-              :options="languageSelectOptions"
-            />
-          </n-form-item>
-        </div>
-
-        <n-form-item label="词典文件路径">
-          <n-input-group>
-            <n-input
-              v-model:value="form.path"
-              placeholder="点「浏览…」选择 .tsv / .mdx，或输入文件路径"
-            />
-            <n-button
-              secondary
-              @click="browseDictionaryFile"
-            >
-              浏览…
-            </n-button>
-          </n-input-group>
-        </n-form-item>
-        <n-text
-          depth="3"
-          class="format-hint"
-        >
-          {{ formatHint }}
-        </n-text>
-
-        <n-space
-          v-if="importing && importProgress"
-          vertical
-          :size="4"
-        >
-          <n-text depth="3">
-            {{ importProgress.phase === "parsing"
-              ? "正在解析词库索引…"
-              : `正在导入：${importProgress.imported} / ${importProgress.total} 词条` }}
-          </n-text>
-          <n-progress
-            type="line"
-            :percentage="importPercentage"
-            :height="8"
-            :show-indicator="false"
-          />
-        </n-space>
-
-        <n-space align="center">
-          <n-button
-            v-if="!importing"
-            type="primary"
-            @click="store.importDictionary()"
-          >
-            开始导入
-          </n-button>
-          <!-- 真取消：后端停止导入并清理半成品 -->
-          <n-button
-            v-if="importing"
-            type="error"
-            secondary
-            :loading="cancelling"
-            @click="store.cancelImport()"
-          >
-            取消导入
-          </n-button>
-          <!-- 返回列表；导入中返回则导入转后台继续（列表页有进度条与取消入口） -->
-          <n-button
-            secondary
-            @click="store.closeForm()"
-          >
-            {{ importing ? "后台继续，返回列表" : "返回" }}
-          </n-button>
-          <n-text
-            v-if="importMessage"
-            type="success"
-          >
-            {{ importMessage }}
-          </n-text>
-        </n-space>
-        <n-alert
-          v-if="importWarning"
-          type="warning"
-          :show-icon="true"
-        >
-          {{ importWarning }}
-        </n-alert>
-        <n-alert
-          v-if="importError"
-          type="error"
-          :show-icon="true"
-        >
-          {{ importError }}
-        </n-alert>
-      </n-space>
-    </n-form>
   </n-card>
 </template>
 
 <style scoped>
-.row {
+.dict-list {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
+  flex-direction: column;
 }
 
-.row-main {
+.dict-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+}
+
+.dict-row + .dict-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.dict-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 28px;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: grab;
+  touch-action: none;
+}
+
+.dict-drag-handle:active {
+  cursor: grabbing;
+}
+
+.dict-drag-handle svg {
+  width: 10px;
+  height: 16px;
+}
+
+.dict-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
   min-width: 0;
 }
 
-.row-detail {
+.dict-row-detail {
   font-size: 12.5px;
 }
 
-.format-hint {
-  display: block;
-  font-size: 12px;
-  white-space: pre-line;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+/* 拖拽跟手的浮层（sortablejs 兜底模式 clone 出的行，挂在 body 下） */
+.dict-row-dragging {
+  background: var(--color-surface);
+  opacity: 0.95;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
 
 .dict-loading {

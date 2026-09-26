@@ -77,7 +77,7 @@ async function lookupWord(target: string): Promise<void> {
       depth="3"
       style="display: block; margin-top: 10px; font-size: 12.5px"
     >
-      没有词典收录「{{ word }}」；换个拼写，或在下方导入更多词典。
+      没有词典收录「{{ word }}」；换个拼写，或到「词典管理」导入更多词典。
     </n-text>
   </n-card>
 </template>

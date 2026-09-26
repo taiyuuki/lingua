@@ -13,9 +13,8 @@ import {
 } from "../lib/api";
 import { describeError } from "../lib/errors";
 
-/** 词典导入表单。id 由后端按文件名自动生成，不再要求手填。 */
+/** 词典导入表单（独立导入页使用）。id 由后端按文件名自动生成，不再要求手填。 */
 export interface ImportForm {
-  open: boolean;
   name: string;
   sourceLanguage: string;
   glossLanguage: string;
@@ -39,7 +38,6 @@ export function isMdxPath(path: string): boolean {
 
 function emptyForm(): ImportForm {
   return {
-    open: false,
     name: "",
     sourceLanguage: "en",
     glossLanguage: "zh",
@@ -91,15 +89,15 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     }
   }
 
-  function openImport(): void {
-    Object.assign(form, emptyForm(), { open: true });
+  /** 进入导入页时调用：空闲则重置表单与提示；导入进行中保留现场（进度与结果提示不动）。 */
+  function beginImport(): void {
+    if (importing.value) {
+      return;
+    }
+    Object.assign(form, emptyForm());
     importError.value = null;
     importMessage.value = null;
     importWarning.value = null;
-  }
-
-  function closeForm(): void {
-    form.open = false;
   }
 
   /** 上次自动填入的名称：换选文件时仅当名称仍是自动值才覆盖，
@@ -182,18 +180,13 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     }
   }
 
-  /** 上移/下移词典：本地交换顺序后整表重写排序，查询命中顺序随之变化。 */
-  async function move(id: string, direction: -1 | 1): Promise<void> {
-    const index = dictionaries.value.findIndex((dict) => dict.id === id);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= dictionaries.value.length) {
+  /** 应用拖拽后的完整顺序：本地立即生效，再整表重写排序；失败提示并回滚重拉。 */
+  async function applyOrder(next: DictionaryInfoDto[]): Promise<void> {
+    const prev = dictionaries.value;
+    const unchanged = next.length === prev.length &&
+      next.every((dict, i) => dict.id === prev[i]?.id);
+    if (unchanged) {
       return;
-    }
-    const next = [...dictionaries.value];
-    if (next[index] && next[target]) {
-      const moved = next[index];
-      next[index] = next[target];
-      next[target] = moved;
     }
     dictionaries.value = next;
     try {
@@ -219,12 +212,11 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     form,
     hasDictionaries,
     load,
-    openImport,
-    closeForm,
+    beginImport,
     setPickedPath,
     importDictionary,
     cancelImport,
     remove,
-    move,
+    applyOrder,
   };
 });

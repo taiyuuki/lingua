@@ -2,6 +2,8 @@ import { createRouter, createWebHashHistory } from "vue-router";
 import HomeView from "./views/HomeView.vue";
 import ProvidersView from "./views/ProvidersView.vue";
 import DictionaryView from "./views/DictionaryView.vue";
+import DictionaryListView from "./views/DictionaryListView.vue";
+import DictionaryImportView from "./views/DictionaryImportView.vue";
 import VocabularyView from "./views/VocabularyView.vue";
 import HistoryView from "./views/HistoryView.vue";
 import SettingsView from "./views/SettingsView.vue";
@@ -13,6 +15,8 @@ export const router = createRouter({
     { path: "/", name: "home", component: HomeView },
     { path: "/providers", name: "providers", component: ProvidersView },
     { path: "/dictionary", name: "dictionary", component: DictionaryView },
+    { path: "/dictionaries", name: "dictionaries", component: DictionaryListView },
+    { path: "/dictionaries/import", name: "dictionary-import", component: DictionaryImportView },
     { path: "/vocabulary", name: "vocabulary", component: VocabularyView },
     { path: "/history", name: "history", component: HistoryView },
     { path: "/settings", name: "settings", component: SettingsView },
