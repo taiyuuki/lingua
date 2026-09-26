@@ -1159,6 +1159,215 @@ pub async fn delete_dictionary(
     .map_err(|error| AppError::Internal(error.to_string()))?
 }
 
+// ---------- 发音库（AudioLib 形态的 .mdd，按词头定位音频） ----------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportAudioLibraryRequest {
+    /// 发音库 .mdd 文件的绝对路径。
+    pub path: String,
+    /// 库名（列表展示用）；空则用文件名。
+    pub name: Option<String>,
+}
+
+/// 一路口音的播放定位（查词面板的喇叭按钮）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WordAudioDto {
+    /// "uk" | "us"。
+    pub accent: String,
+    /// `mdx-res://` 资源 URL（发音库 id 充当词典 id 段，前端照常做平台形态转换）。
+    pub url: String,
+}
+
+/// 导入发音库：.mdd 收编到 `app_data/audiolibs/<id>.mdd`，词头音频索引
+/// 写库，解析句柄进缓存。同文件重导（同 id）覆盖旧库。
+/// 几百 MB 的库复制 + 只读元数据段建索引，秒级完成，不做进度事件。
+#[tauri::command]
+pub async fn import_audio_library(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    request: ImportAudioLibraryRequest,
+) -> Result<lingua_database::AudioLibraryInfo, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = request.path.trim();
+        if path.is_empty() {
+            return Err(AppError::InvalidInput("path is required".to_string()));
+        }
+        if !path.to_ascii_lowercase().ends_with(".mdd") {
+            return Err(AppError::InvalidInput(
+                "请选择 .mdd 发音库文件（词典的 .mdx 不能作为发音库导入）".to_string(),
+            ));
+        }
+        let source = std::path::Path::new(path);
+        if !source.is_file() {
+            return Err(AppError::InvalidInput(format!("文件不存在：{path}")));
+        }
+        let id = format!("al-{}", generate_dictionary_id(path));
+        let name = request
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                source
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("发音库")
+                    .to_string()
+            });
+
+        // 收编原件（几百 MB 复制，几秒）。
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| AppError::Platform(error.to_string()))?;
+        let libraries_dir = data_dir.join("audiolibs");
+        std::fs::create_dir_all(&libraries_dir)
+            .map_err(|error| AppError::Internal(format!("无法创建发音库目录：{error}")))?;
+        let destination = libraries_dir.join(format!("{id}.mdd"));
+        std::fs::copy(source, &destination)
+            .map_err(|error| AppError::InvalidInput(format!("复制发音库失败（{path}）：{error}")))?;
+
+        // 解析 key 区 + 提取词头索引（只读元数据段，不扫音频数据区）。
+        let library = lingua_dictionary::audio::MddResourceFile::open(&destination)?;
+        let entries = lingua_dictionary::audio::extract_audio_entries(library.keys());
+        if entries.is_empty() {
+            let _ = std::fs::remove_file(&destination);
+            return Err(AppError::InvalidInput(format!(
+                "`{name}` 里没有可按词头定位的音频：需要 word.spx / us\\word.mp3 这类按词头命名的文件"
+            )));
+        }
+        let mut has_uk = false;
+        let mut has_us = false;
+        let records: Vec<lingua_database::AudioKeyRecord> = entries
+            .iter()
+            .map(|entry| {
+                match entry.accent {
+                    lingua_dictionary::audio::Accent::Uk => has_uk = true,
+                    lingua_dictionary::audio::Accent::Us => has_us = true,
+                }
+                lingua_database::AudioKeyRecord {
+                    word_lower: entry.word.clone(),
+                    accent: entry.accent.as_str().to_string(),
+                    resource_path: entry.resource_path.clone(),
+                }
+            })
+            .collect();
+        let written = database.replace_audio_library(
+            &id,
+            &name,
+            &destination.display().to_string(),
+            &records,
+        )?;
+        let mut accents = Vec::new();
+        if has_uk {
+            accents.push("uk".to_string());
+        }
+        if has_us {
+            accents.push("us".to_string());
+        }
+
+        // 句柄进缓存：资源协议按 id 直接取，不再查库。
+        if let Some(app_state) = app.try_state::<AppState>() {
+            if let Ok(mut cache) = app_state.audio_files.lock() {
+                cache.insert(id.clone(), std::sync::Arc::new(library));
+            }
+        }
+        tracing::info!(library = %id, keys = written, "audio library imported");
+        Ok(lingua_database::AudioLibraryInfo {
+            id,
+            name,
+            entry_count: written,
+            accents,
+        })
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+#[tauri::command]
+pub async fn list_audio_libraries(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<lingua_database::AudioLibraryInfo>, AppError> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || database.list_audio_libraries())
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 删除发音库：缓存句柄、收编的 .mdd 文件与库行（词头索引级联）一并清理。
+#[tauri::command]
+pub async fn delete_audio_library(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<(), AppError> {
+    let id = id.trim().to_string();
+    if id.is_empty()
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(AppError::InvalidInput("invalid audio library id".to_string()));
+    }
+    if let Some(app_state) = app.try_state::<AppState>() {
+        if let Ok(mut cache) = app_state.audio_files.lock() {
+            cache.remove(&id);
+        }
+    }
+    let Ok(data_dir) = app.path().app_data_dir() else {
+        return Ok(());
+    };
+    let _ = std::fs::remove_file(data_dir.join("audiolibs").join(format!("{id}.mdd")));
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database.delete_audio_library(&id)?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
+/// 按词头查发音库音频（大小写不敏感），每种口音取最先导入的命中。
+#[tauri::command]
+pub async fn lookup_word_audio(
+    state: tauri::State<'_, AppState>,
+    word: String,
+) -> Result<Vec<WordAudioDto>, AppError> {
+    let word = word.trim().to_string();
+    if word.is_empty() {
+        return Ok(Vec::new());
+    }
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let hits = database.lookup_audio(&word)?;
+        let mut out = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
+        for hit in hits {
+            if seen.contains(&hit.accent) {
+                continue;
+            }
+            seen.push(hit.accent.clone());
+            let url = format!(
+                "{}://localhost/{}/{}",
+                lingua_dictionary::html_sanitize::RESOURCE_SCHEME,
+                hit.library_id,
+                lingua_dictionary::html_sanitize::percent_encode_path(&hit.resource_path),
+            );
+            out.push(WordAudioDto {
+                accent: hit.accent,
+                url,
+            });
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|error| AppError::Internal(error.to_string()))?
+}
+
 // ---------- 生词本（Phase 4） ----------
 
 #[derive(Debug, Default, Deserialize)]
@@ -1861,5 +2070,57 @@ mod tests {
         std::fs::write(dir.join("O8C.css"), b"kept").unwrap();
         alias_missing_css(&dir, &[html]);
         assert_eq!(std::fs::read(dir.join("O8C.css")).unwrap(), b"kept");
+    }
+
+    /// 发音库导入全链路（真机文件，默认忽略）：
+    /// `cargo test -p lingua --lib imports_real -- --ignored --nocapture`
+    /// 复制收编 → key 解析 → 词头索引入库 → 查词 → 随机读取 → Speex 转码。
+    #[test]
+    #[ignore = "依赖本机的英式美式发音库文件"]
+    fn imports_real_sound_library_end_to_end() {
+        use lingua_database::AudioKeyRecord;
+        let source = std::path::Path::new(
+            r"C:\Users\falwy\Documents\dict词库\发音库\英式美式发音库\Sound_us_uk.mdd",
+        );
+        if !source.is_file() {
+            return;
+        }
+
+        let dir = std::env::temp_dir().join("lingua-audio-e2e");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let destination = dir.join("al-sound.mdd");
+        std::fs::copy(source, &destination).unwrap();
+
+        let library = lingua_dictionary::audio::MddResourceFile::open(&destination).unwrap();
+        let entries = lingua_dictionary::audio::extract_audio_entries(library.keys());
+        assert!(entries.len() > 200_000, "{}", entries.len());
+
+        let database = lingua_database::Database::open(&dir.join("e2e.sqlite3")).unwrap();
+        database.migrate().unwrap();
+        let records: Vec<AudioKeyRecord> = entries
+            .iter()
+            .map(|entry| AudioKeyRecord {
+                word_lower: entry.word.clone(),
+                accent: entry.accent.as_str().to_string(),
+                resource_path: entry.resource_path.clone(),
+            })
+            .collect();
+        let written = database
+            .replace_audio_library("al-e2e", "英式美式发音库", &destination.display().to_string(), &records)
+            .unwrap();
+        assert_eq!(written, entries.len(), "词头索引应全部写入");
+
+        // 查词 → 命中英/美两路 → 随机读取 → Speex 解码为可播放 WAV。
+        let hits = database.lookup_audio("The").unwrap();
+        assert_eq!(hits.len(), 2, "the 应有英/美两路");
+        for hit in hits {
+            let data = library.read_resource(&hit.resource_path).unwrap().unwrap();
+            let wav = crate::speex::speex_to_wav(&data).expect("spx 应能解码为 WAV");
+            assert!(wav.len() > 1000, "{}", wav.len());
+            assert_eq!(&wav[0..4], b"RIFF", "应是 WAV 容器");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

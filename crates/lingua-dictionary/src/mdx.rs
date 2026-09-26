@@ -52,13 +52,13 @@ struct KeyGroup {
     record_offset: u64,
 }
 
-struct RecordBlockLayout {
+pub(crate) struct RecordBlockLayout {
     /// 压缩数据在文件中的起始偏移。
-    file_offset: usize,
-    comp_len: usize,
+    pub(crate) file_offset: usize,
+    pub(crate) comp_len: usize,
     /// 解压后数据在虚拟 record 流中的起始偏移。
-    stream_offset: u64,
-    decomp_len: usize,
+    pub(crate) stream_offset: u64,
+    pub(crate) decomp_len: usize,
 }
 
 /// 一个词条组：词头 + 别名 + 原始释义文本（HTML）。
@@ -110,7 +110,7 @@ fn invalid(message: impl Into<String>) -> AppError {
 /// 解压一个 MDict 数据块：`[类型 4B][adler32 4B]` 前缀（类型 1 = LZO、
 /// 2 = zlib）后是压缩流；类型 0 表示未压缩——v1.2 数据原样，
 /// v2.0 仍带 8 字节前缀需跳过。
-fn decompress_block(
+pub(crate) fn decompress_block(
     data: &[u8],
     v2: bool,
     expected_len: usize,
@@ -168,21 +168,21 @@ fn zlib(data: &[u8], expected_len: usize, context: &str) -> AppResult<Vec<u8>> {
 }
 
 /// 顺序字节读取器：越界一律报错，不做静默截断。
-struct Reader<'a> {
+pub(crate) struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
 }
 
 impl<'a> Reader<'a> {
-    fn new(buf: &'a [u8]) -> Self {
+    pub(crate) fn new(buf: &'a [u8]) -> Self {
         Self { buf, pos: 0 }
     }
 
-    fn remaining(&self) -> usize {
+    pub(crate) fn remaining(&self) -> usize {
         self.buf.len() - self.pos
     }
 
-    fn take(&mut self, len: usize) -> AppResult<&'a [u8]> {
+    pub(crate) fn take(&mut self, len: usize) -> AppResult<&'a [u8]> {
         if self.remaining() < len {
             return Err(invalid("MDX 数据损坏（意外结束）"));
         }
@@ -191,7 +191,7 @@ impl<'a> Reader<'a> {
         Ok(&self.buf[start..start + len])
     }
 
-    fn skip(&mut self, len: usize) -> AppResult<()> {
+    pub(crate) fn skip(&mut self, len: usize) -> AppResult<()> {
         self.take(len).map(|_| ())
     }
 
@@ -210,7 +210,7 @@ impl<'a> Reader<'a> {
     }
 
     /// MDict 数字：v1.2 为 u32 BE；v2.0 占 8 字节槽（跳过高 4 字节）。
-    fn number(&mut self, v2: bool) -> AppResult<u64> {
+    pub(crate) fn number(&mut self, v2: bool) -> AppResult<u64> {
         if v2 {
             self.skip(4)?;
             self.u32_be().map(u64::from)
@@ -292,17 +292,17 @@ fn decode_text(bytes: &[u8], utf16: bool, encoding: &'static Encoding) -> String
 }
 
 /// 解析后的 header 关键属性。
-struct Header {
-    v2: bool,
-    utf16: bool,
-    encoding: &'static Encoding,
-    title: Option<String>,
+pub(crate) struct Header {
+    pub(crate) v2: bool,
+    pub(crate) utf16: bool,
+    pub(crate) encoding: &'static Encoding,
+    pub(crate) title: Option<String>,
     /// `Encrypted` 属性位标志：bit 1（值 2）= key 信息区固定密钥加密，
     /// 离线可解；bit 0（值 1）= 用户注册信息加密，无法离线解密。
-    encrypt_bits: u8,
+    pub(crate) encrypt_bits: u8,
 }
 
-fn parse_header(buf: &[u8]) -> AppResult<(Header, usize)> {
+pub(crate) fn parse_header(buf: &[u8]) -> AppResult<(Header, usize)> {
     let mut reader = Reader::new(buf);
     let header_len = reader.u32_be()? as usize;
     if header_len == 0 || header_len + 8 > buf.len() {
@@ -418,9 +418,55 @@ fn parse_container(file: Vec<u8>) -> AppResult<ContainerIndex> {
     }
     let key_index_raw = reader.take(key_index_comp_len)?;
     let key_blocks_raw = reader.take(key_blocks_len)?;
+    let keys = parse_key_section(
+        &header,
+        num_key_blocks,
+        num_entries,
+        key_index_decomp_len,
+        key_index_raw,
+        key_blocks_raw,
+    )?;
 
-    // ---- key 块信息区：逐块(词条数 + 首词 + 尾词 + 压缩长 + 解压长) ----
-    // bit 1（值 2）：信息区 [8..] 用 ripemd128 派生固定密钥加密（离线可解）。
+    // ---- record 块区 ----
+    let num_record_blocks = reader.number(header.v2)? as usize;
+    let _num_record_entries = reader.number(header.v2)? as usize;
+    let record_index_len = reader.number(header.v2)? as usize;
+    let record_blocks_len = reader.number(header.v2)? as usize;
+    let record_index_raw = reader.take(record_index_len)?;
+    let record_data_start = key_section_start + reader.pos;
+    let record_blocks = parse_record_blocks(
+        header.v2,
+        record_index_raw,
+        record_data_start,
+        num_record_blocks,
+    )?;
+    if record_data_start + record_blocks_len > file.len() {
+        // 个别引擎声明的 record 数据区比文件多几个字节，只告警不失败。
+        tracing::warn!(
+            declared = record_blocks_len,
+            "mdict record data size exceeds file (continuing)"
+        );
+    }
+
+    Ok(ContainerIndex {
+        header,
+        keys,
+        record_blocks,
+        file,
+    })
+}
+
+/// key 区公共解析（整文件读取与 seek 式读取共用）：
+/// 信息区（可加密，逐块(词条数 + 首词 + 尾词 + 压缩长 + 解压长)）
+/// + 数据区（块内逐词条(记录偏移 + NUL 结尾词头)）。
+pub(crate) fn parse_key_section(
+    header: &Header,
+    num_key_blocks: usize,
+    num_entries: usize,
+    key_index_decomp_len: usize,
+    key_index_raw: &[u8],
+    key_blocks_raw: &[u8],
+) -> AppResult<Vec<(String, u64)>> {
     let mut key_index_decrypted;
     let key_index_raw = if header.v2 && header.encrypt_bits & 0x02 != 0 {
         key_index_decrypted = key_index_raw.to_vec();
@@ -442,7 +488,6 @@ fn parse_container(file: Vec<u8>) -> AppResult<ContainerIndex> {
         blocks_meta.push((comp_len, decomp_len));
     }
 
-    // ---- key 块：块内逐词条(记录偏移 + NUL 结尾词头) ----
     let mut keys: Vec<(String, u64)> = Vec::with_capacity(num_entries.min(1 << 22));
     let mut block_reader = Reader::new(key_blocks_raw);
     for &(comp_len, decomp_len) in &blocks_meta {
@@ -469,21 +514,23 @@ fn parse_container(file: Vec<u8>) -> AppResult<ContainerIndex> {
             "mdict key count mismatch (continuing)"
         );
     }
+    Ok(keys)
+}
 
-    // ---- record 块区 ----
-    let num_record_blocks = reader.number(header.v2)? as usize;
-    let _num_record_entries = reader.number(header.v2)?;
-    let record_index_len = reader.number(header.v2)? as usize;
-    let record_blocks_len = reader.number(header.v2)? as usize;
-    let record_index_raw = reader.take(record_index_len)?;
+/// record 区索引解析（共用）：逐块(压缩长 + 解压长) → 绝对偏移布局。
+pub(crate) fn parse_record_blocks(
+    v2: bool,
+    record_index_raw: &[u8],
+    record_data_start: usize,
+    num_record_blocks: usize,
+) -> AppResult<Vec<RecordBlockLayout>> {
     let mut info = Reader::new(record_index_raw);
-    let record_data_start = key_section_start + reader.pos;
     let mut record_blocks = Vec::with_capacity(num_record_blocks.min(65536));
     let mut file_offset = record_data_start;
     let mut stream_offset: u64 = 0;
     for _ in 0..num_record_blocks {
-        let comp_len = info.number(header.v2)? as usize;
-        let decomp_len = info.number(header.v2)? as usize;
+        let comp_len = info.number(v2)? as usize;
+        let decomp_len = info.number(v2)? as usize;
         record_blocks.push(RecordBlockLayout {
             file_offset,
             comp_len,
@@ -493,20 +540,7 @@ fn parse_container(file: Vec<u8>) -> AppResult<ContainerIndex> {
         file_offset += comp_len;
         stream_offset += decomp_len as u64;
     }
-    if record_data_start + record_blocks_len > file.len() {
-        // 个别引擎声明的 record 数据区比文件多几个字节，只告警不失败。
-        tracing::warn!(
-            declared = record_blocks_len,
-            "mdict record data size exceeds file (continuing)"
-        );
-    }
-
-    Ok(ContainerIndex {
-        header,
-        keys,
-        record_blocks,
-        file,
-    })
+    Ok(record_blocks)
 }
 
 /// 并行转换一批 MDX 词条（HTML 净化是 CPU 大头：html5ever 解析 +

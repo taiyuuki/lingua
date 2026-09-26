@@ -2,12 +2,16 @@ import { computed, reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import {
   cancelDictionaryImport,
+  deleteAudioLibrary,
   deleteDictionary,
+  importAudioLibrary,
   importDictionaryMdx,
   importDictionaryTsv,
+  listAudioLibraries,
   listDictionaries,
   reorderDictionaries,
   onDictionaryImportProgress,
+  type AudioLibraryDto,
   type DictionaryImportProgress,
   type DictionaryInfoDto,
 } from "../lib/api";
@@ -197,6 +201,60 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     }
   }
 
+  // ---------- 发音库 ----------
+
+  const audioLibraries = ref<AudioLibraryDto[]>([]);
+  const audioLoading = ref(false);
+  /** 发音库导入中（复制 + 建索引，秒级，无进度事件）。 */
+  const audioImporting = ref(false);
+  const audioError = ref<string | null>(null);
+  const audioMessage = ref<string | null>(null);
+  /** 正在删除的发音库 id（行级 loading）。 */
+  const audioDeletingId = ref<string | null>(null);
+
+  async function loadAudioLibraries(): Promise<void> {
+    audioLoading.value = true;
+    audioError.value = null;
+    try {
+      audioLibraries.value = await listAudioLibraries();
+    } catch (error) {
+      audioError.value = describeError(error);
+    } finally {
+      audioLoading.value = false;
+    }
+  }
+
+  /** 导入发音库；成功返回 true（提示信息已写入 audioMessage）。 */
+  async function importAudio(path: string): Promise<boolean> {
+    audioImporting.value = true;
+    audioError.value = null;
+    audioMessage.value = null;
+    try {
+      const library = await importAudioLibrary(path);
+      audioMessage.value = `导入成功：${library.name}，${library.entryCount} 个词头音频` +
+        `（${library.accents.map((accent) => (accent === "uk" ? "英" : "美")).join(" / ")}音）`;
+      await loadAudioLibraries();
+      return true;
+    } catch (error) {
+      audioError.value = describeError(error);
+      return false;
+    } finally {
+      audioImporting.value = false;
+    }
+  }
+
+  async function removeAudio(id: string): Promise<void> {
+    audioDeletingId.value = id;
+    try {
+      await deleteAudioLibrary(id);
+      await loadAudioLibraries();
+    } catch (error) {
+      audioError.value = describeError(error);
+    } finally {
+      audioDeletingId.value = null;
+    }
+  }
+
   return {
     dictionaries,
     loaded,
@@ -218,5 +276,14 @@ export const useDictionariesStore = defineStore("dictionaries", () => {
     cancelImport,
     remove,
     applyOrder,
+    audioLibraries,
+    audioLoading,
+    audioImporting,
+    audioError,
+    audioMessage,
+    audioDeletingId,
+    loadAudioLibraries,
+    importAudio,
+    removeAudio,
   };
 });

@@ -63,6 +63,11 @@ pub struct AppState {
     pub ocr_retry: Mutex<Option<OcrImage>>,
     /// 最近一次截图翻译的识别来源；划词翻译触发时清除。
     pub ocr_source: Mutex<Option<OcrSourceInfo>>,
+    /// 发音库 .mdd 的随机读取句柄（id → 已解析句柄）。
+    /// setup 阶段按库列表预载，导入/删除命令同步增删；资源协议
+    /// 处理器只读缓存，不碰数据库。
+    pub audio_files:
+        Mutex<std::collections::HashMap<String, std::sync::Arc<lingua_dictionary::audio::MddResourceFile>>>,
 }
 
 impl AppState {
@@ -74,6 +79,7 @@ impl AppState {
             ocr: Mutex::new(None),
             ocr_retry: Mutex::new(None),
             ocr_source: Mutex::new(None),
+            audio_files: Mutex::new(std::collections::HashMap::new()),
         }
     }
 }

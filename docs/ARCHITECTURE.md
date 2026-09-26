@@ -287,3 +287,38 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
 覆盖翻译（bbox 数据已保留）、.apkg 打包导出、学习统计报表。
 （图标与文件选择器、Windows 打包 nsis/msi、托盘与开机自启已完成：
 `pnpm tauri build` 产出 `target/release/bundle/` 下两种安装包。）
+
+## 12. 词典发音库（AudioLib 形态 .mdd）
+
+**场景**：牛津 9 这类词库正文里发音链接（`snd://…spx`）指向的音频不在
+配对 .mdd 里，需要独立的「发音库」兜底——即 MDict 圈流通的 AudioLib
+. mdd（如英式美式发音库：`word.spx` 美音 + `word_Uk.spx` 英音，24.8 万
+条、Encrypted=2）。NHK 式纯数字命名（`SPX\0001.spx`）无法按词头定位，
+只能作为配对 .mdd 随词典导入（已支持）。
+
+**架构决策**（区别于配对 .mdd 的整体解包）：
+
+- **原件收编 + 索引入库 + 随机读取**。发音库音频不落成几十万个小文件：
+  .mdd 复制到 `app_data/audiolibs/<id>.mdd`（id 前缀 `al-`，按文件名
+  哈希生成，同文件重导覆盖）；词头→音频索引进 SQLite（migration 0012：
+  `audio_libraries` / `audio_keys`，PK = 库+词头+口音，`word_lower`
+  索引）；`lingua-dictionary::audio::MddResourceFile` 只解析 header /
+  key 区 / record 块布局（几 MB，seek 式读取，不扫几百 MB 数据区），
+  `read_resource` 按 key 定位偏移 → 解压单个 record 块 → 切片返回。
+- **口音提取**（`extract_audio_entries`，导入期一次性）：识别裸名
+  `word.spx`（默认美音）/ `word_Uk.spx`、口音目录 `us\` / `uk\`、
+  口音+同词序号后缀 `word__gb_1` / `_speak_1_us_3`；纯数字名与非音频
+  扩展名跳过。词头入库为小写。
+- **服务复用 `mdx-res://`**：`lookup_word_audio` 返回
+  `mdx-res://localhost/<库id>/<资源路径>`；协议处理器先查词典资源
+  目录、未命中再查发音库句柄缓存（`AppState.audio_files`，setup 预载、
+  导入/删除命令同步增删），`.spx` 照常就地转 WAV。前端
+  `platformResourceUrl` 做与富文本相同的 Windows WebView2 形态转换。
+- **前端**：词条面板（Popup 词典区 / 词卡 / 查词页共用）词头旁
+  🔊英 / 🔊美 按钮，按当前 lemma 查 `lookup_word_audio`，命中才显示；
+  词典内嵌 `sound://` 喇叭不受影响（更准的义项级发音仍优先）。
+  管理入口在词典管理页「发音库」卡片（添加 / 删除 / 口音覆盖展示）。
+
+**已知限制**：多口音取「最先导入的库」的命中；牛津 9 的 `snd://`
+前缀净化改写与「按引用文件名跨库解析」未做（P2 候选）；日语等
+非英/美口音体系未建模。

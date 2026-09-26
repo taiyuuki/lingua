@@ -21,6 +21,11 @@ export function renderRichHtml(html: string): string {
   return html.replaceAll("mdx-res://localhost/", MDX_RES_ORIGIN);
 }
 
+/** 单个 mdx-res 资源 URL → 当前平台可加载形态（喇叭按钮直连播放用）。 */
+export function platformResourceUrl(url: string): string {
+  return url.replace("mdx-res://localhost/", MDX_RES_ORIGIN);
+}
+
 /** 音频资源链接判定（sound:// 在导入期已改写为 mdx-res 资源 URL）。 */
 const AUDIO_URL = /\.(mp3|wav|ogg|oga|m4a|aac|spx|opus|flac|webm)(\?|$)/i;
 

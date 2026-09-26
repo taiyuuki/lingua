@@ -64,6 +64,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 lingua_platform::create_default_selection_service(),
             ));
 
+            // 发音库句柄预载（只读元数据段）：资源协议按 id 直接取缓存。
+            preload_audio_libraries(app.handle(), &database);
+
             // 全局快捷键：从 settings 读取（默认 alt+t），触发翻译 pipeline。
             register_shortcut_from_settings(app.handle(), &database)?;
 
@@ -113,6 +116,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::lookup_word_dictionaries,
             commands::reorder_dictionaries,
             commands::delete_dictionary,
+            commands::import_audio_library,
+            commands::list_audio_libraries,
+            commands::delete_audio_library,
+            commands::lookup_word_audio,
             commands::list_vocabulary,
             commands::vocabulary_count,
             commands::vocabulary_batch_delete,
@@ -149,9 +156,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// `mdx-res://localhost/<词典id>/<资源路径>` —— MDX 词典富文本的
-/// 资源服务（MDD 解包产物，位于 app_data/mdx/<id>/）。释义 HTML 里
-/// 的 CSS / 图片链接在导入净化时已改写到本协议。
+/// `mdx-res://localhost/<id>/<资源路径>` —— MDX 词典富文本的资源服务。
+///
+/// 词典：MDD 解包产物，位于 app_data/mdx/<id>/（释义 HTML 里的
+/// CSS / 图片 / sound:// 链接在导入净化时改写到本协议）。
+/// 发音库：`al-` 前缀的独立 .mdd（按词头定位音频），句柄从
+/// AppState 缓存按需随机读取，词典资源目录未命中时兜底。
 fn handle_mdx_resource(
     context: tauri::UriSchemeContext<'_, tauri::Wry>,
     request: tauri::http::Request<Vec<u8>>,
@@ -177,33 +187,85 @@ fn handle_mdx_resource(
     let Ok(data_dir) = app.path().app_data_dir() else {
         return not_found();
     };
-    let full_path = data_dir.join("mdx").join(dictionary_id).join(&resource);
+    let full_path = data_dir.join("mdx").join(&dictionary_id).join(&resource);
     match std::fs::read(&full_path) {
-        Ok(bytes) => {
-            // .spx（Ogg/Speex）：浏览器不支持，就地转码 WAV。
-            let (bytes, content_type) = if resource
-                .rsplit('.')
-                .next()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("spx"))
-            {
-                match speex::speex_to_wav(&bytes) {
-                    Some(wav) => (wav, "audio/wav"),
-                    None => {
-                        tracing::warn!(resource = %resource, "speex decode failed");
-                        return not_found();
-                    }
-                }
-            } else {
-                (bytes, resource_content_type(&resource))
-            };
-            tauri::http::Response::builder()
-                .header("Content-Type", content_type)
-                .header("Cache-Control", "max-age=86400")
-                .body(bytes)
-                .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+        Ok(bytes) => resource_response(&resource, bytes),
+        // 词典资源目录没有 → 试发音库（id 由导入命令生成，al- 前缀）。
+        Err(_) => {
+            let from_library = app.try_state::<AppState>().and_then(|state| {
+                let handle = state
+                    .audio_files
+                    .lock()
+                    .ok()?
+                    .get(dictionary_id.as_str())?
+                    .clone();
+                handle.read_resource(&resource).ok().flatten()
+            });
+            match from_library {
+                Some(bytes) => resource_response(&resource, bytes),
+                None => not_found(),
+            }
         }
-        Err(_) => not_found(),
     }
+}
+
+/// 资源响应：`.spx`（Ogg/Speex，浏览器不支持）就地转码 WAV，带 24h 缓存头。
+fn resource_response(resource: &str, bytes: Vec<u8>) -> tauri::http::Response<Vec<u8>> {
+    let (bytes, content_type) = if resource
+        .rsplit('.')
+        .next()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("spx"))
+    {
+        match speex::speex_to_wav(&bytes) {
+            Some(wav) => (wav, "audio/wav"),
+            None => {
+                tracing::warn!(resource = %resource, "speex decode failed");
+                return tauri::http::Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()));
+            }
+        }
+    } else {
+        (bytes, resource_content_type(resource))
+    };
+    tauri::http::Response::builder()
+        .header("Content-Type", content_type)
+        .header("Cache-Control", "max-age=86400")
+        .body(bytes)
+        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
+/// 预载全部发音库的解析句柄（导入命令与资源协议共用缓存）。
+/// 打开失败的库告警跳过：查词发音按缺失处理，删除重导可修复。
+fn preload_audio_libraries(app: &tauri::AppHandle, database: &lingua_database::Database) {
+    let Ok(libraries) = database.list_audio_libraries() else {
+        return;
+    };
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Ok(mut cache) = state.audio_files.lock() else {
+        return;
+    };
+    for library in libraries {
+        let Ok(path) = database.audio_library_path(&library.id) else {
+            continue;
+        };
+        let Some(path) = path else {
+            tracing::warn!(library = %library.id, "audio library file path missing in db");
+            continue;
+        };
+        match lingua_dictionary::audio::MddResourceFile::open(std::path::Path::new(&path)) {
+            Ok(handle) => {
+                cache.insert(library.id.clone(), std::sync::Arc::new(handle));
+            }
+            Err(error) => {
+                tracing::warn!(library = %library.id, %error, "audio library preload failed");
+            }
+        }
+    }
+    tracing::info!(count = cache.len(), "audio libraries preloaded");
 }
 
 fn percent_decode(input: &str) -> String {

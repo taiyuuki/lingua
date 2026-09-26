@@ -492,6 +492,59 @@ export async function lookupWordDictionaries(
   });
 }
 
+// ---------- 发音库（AudioLib 形态的 .mdd，按词头定位音频） ----------
+
+/** 发音库条目：独立 .mdd 音频包（词头命名），查词发音按词头查它。 */
+export interface AudioLibraryDto {
+  id: string;
+  name: string;
+  /** 实际写入的词头音频条数。 */
+  entryCount: number;
+  /** 覆盖的口音："uk" | "us"。 */
+  accents: string[];
+}
+
+/** 一路口音的播放定位（词条面板的喇叭按钮）。 */
+export interface WordAudioDto {
+  accent: "uk" | "us";
+  /** mdx-res 资源 URL（渲染播放前需做平台形态转换）。 */
+  url: string;
+}
+
+/** 打开文件选择框选一个发音库 .mdd；取消返回 null。 */
+export async function pickAudioLibraryPath(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selection = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "发音库（MDict 资源包）", extensions: ["mdd"] }],
+  });
+  return typeof selection === "string" ? selection : null;
+}
+
+/** 导入发音库（.mdd 收编 + 词头索引写库），同文件重导覆盖。 */
+export async function importAudioLibrary(
+  path: string,
+  name?: string | null,
+): Promise<AudioLibraryDto> {
+  return invoke<AudioLibraryDto>("import_audio_library", {
+    request: { path, name: name ?? null },
+  });
+}
+
+export async function listAudioLibraries(): Promise<AudioLibraryDto[]> {
+  return invoke<AudioLibraryDto[]>("list_audio_libraries");
+}
+
+export async function deleteAudioLibrary(id: string): Promise<void> {
+  await invoke("delete_audio_library", { id });
+}
+
+/** 按词头查发音库音频（每种口音一个，先导入的库优先）；未命中返回空。 */
+export async function lookupWordAudio(word: string): Promise<WordAudioDto[]> {
+  return invoke<WordAudioDto[]>("lookup_word_audio", { word });
+}
+
 export async function listVocabulary(
   filter: VocabularyFilterDto,
 ): Promise<VocabularyItemDto[]> {

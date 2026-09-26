@@ -13,6 +13,7 @@ import {
   NText,
 } from "naive-ui";
 import { useDictionariesStore } from "../stores/dictionaries";
+import { pickAudioLibraryPath } from "../lib/api";
 
 /** 词典列表卡片（词典管理页）：拖拽排序 + 删除 + 后台导入进度横条。 */
 const store = useDictionariesStore();
@@ -25,6 +26,12 @@ const {
   importProgress,
   deletingId,
   form,
+  audioLibraries,
+  audioLoading,
+  audioImporting,
+  audioError,
+  audioMessage,
+  audioDeletingId,
 } = storeToRefs(store);
 
 const router = useRouter();
@@ -32,11 +39,25 @@ const router = useRouter();
 /** 导入中横条显示的词典名。 */
 const importName = computed(() => form.value.name || form.value.path || "词典");
 
+/** 发音库口音标签（uk → 英 / us → 美）。 */
+function accentLabel(accent: string): string {
+  return accent === "uk" ? "英音" : "美音";
+}
+
+async function addAudioLibrary(): Promise<void> {
+  const path = await pickAudioLibraryPath();
+  if (!path) {
+    return;
+  }
+  await store.importAudio(path);
+}
+
 const listEl = ref<HTMLElement | null>(null);
 let sortable: Sortable | null = null;
 
 onMounted(() => {
   void store.load();
+  void store.loadAudioLibraries();
   if (listEl.value) {
     sortable = new Sortable(listEl.value, {
       handle: ".dict-drag-handle",
@@ -238,6 +259,104 @@ onBeforeUnmount(() => {
       style="margin: 12px 0"
     />
   </n-card>
+
+  <!-- 发音库：独立 .mdd 音频包（按词头命名），任何词典查词都能出声 -->
+  <n-card
+    title="发音库"
+    size="small"
+    style="margin-top: 16px"
+  >
+    <template #header-extra>
+      <n-button
+        size="small"
+        type="primary"
+        :loading="audioImporting"
+        @click="addAudioLibrary"
+      >
+        添加发音库
+      </n-button>
+    </template>
+
+    <n-text
+      v-if="!audioLoading"
+      depth="3"
+      style="display: block; margin-bottom: 12px"
+    >
+      独立的 .mdd 音频包（如英式美式发音库）：按词头命名音频，查词与划词弹窗里点喇叭即可播放对应口音，覆盖所有词典。
+    </n-text>
+    <n-alert
+      v-if="audioError"
+      type="error"
+      :show-icon="false"
+      style="margin-bottom: 12px"
+    >
+      {{ audioError }}
+    </n-alert>
+    <n-alert
+      v-if="audioMessage"
+      type="success"
+      :show-icon="false"
+      style="margin-bottom: 12px"
+    >
+      {{ audioMessage }}
+    </n-alert>
+
+    <div
+      v-if="audioLoading"
+      class="dict-loading"
+    >
+      <n-spin size="small" />
+      <n-text depth="3">
+        正在加载发音库列表…
+      </n-text>
+    </div>
+
+    <div
+      v-for="library in audioLibraries"
+      :key="library.id"
+      class="audio-row"
+    >
+      <div class="dict-row-main">
+        <n-text strong>
+          {{ library.name }}
+        </n-text>
+        <n-text
+          depth="3"
+          class="dict-row-detail"
+        >
+          {{ library.entryCount }} 个词头 ·
+          <span
+            v-for="accent in library.accents"
+            :key="accent"
+            class="accent-chip"
+          >{{ accentLabel(accent) }}</span>
+        </n-text>
+      </div>
+      <n-popconfirm
+        :show-icon="false"
+        :disabled="audioDeletingId !== null"
+        @positive-click="store.removeAudio(library.id)"
+      >
+        <template #trigger>
+          <n-button
+            size="small"
+            type="error"
+            secondary
+            :loading="audioDeletingId === library.id"
+            :disabled="audioDeletingId !== null && audioDeletingId !== library.id"
+          >
+            删除
+          </n-button>
+        </template>
+        将删除词头索引与收编的音频文件（立即释放磁盘），确定？
+      </n-popconfirm>
+    </div>
+    <n-empty
+      v-if="audioLibraries.length === 0 && !audioLoading && !audioImporting"
+      description="还没有发音库。支持导入按词头命名的 .mdd（word.spx / us\\word.mp3 这类）。"
+      style="margin: 12px 0"
+    />
+  </n-card>
 </template>
 
 <style scoped>
@@ -312,5 +431,26 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.audio-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+}
+
+.audio-row + .audio-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.accent-chip {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 18px;
 }
 </style>

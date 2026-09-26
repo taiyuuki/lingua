@@ -221,7 +221,7 @@ fn rewrite_resource<'v>(value: &'v str, base: &str) -> Option<Cow<'v, str>> {
 }
 
 /// URL 路径段百分号编码（RFC 3986 unreserved + `/` 之外全部转义）。
-fn percent_encode_path(path: &str) -> String {
+pub fn percent_encode_path(path: &str) -> String {
     let mut out = String::with_capacity(path.len());
     for byte in path.bytes() {
         match byte {

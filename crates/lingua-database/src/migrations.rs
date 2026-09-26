@@ -72,6 +72,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "translation_history",
         sql: include_str!("../migrations/0011_translation_history.sql"),
     },
+    Migration {
+        version: 12,
+        name: "audio_libraries",
+        sql: include_str!("../migrations/0012_audio_libraries.sql"),
+    },
 ];
 
 /// 当前代码支持的最高 schema 版本。
