@@ -287,10 +287,10 @@ onUnmounted(() => {
     size="small"
   >
     <template #header-extra>
-      <n-space
+      <!-- 不用 n-space：v-if 按钮（开始复习）随到期数显隐会触发其重复渲染（包裹层 key 重复） -->
+      <div
         v-if="!inReview"
-        :size="12"
-        align="center"
+        class="header-actions"
       >
         <n-button
           v-if="dueCount > 0"
@@ -303,7 +303,7 @@ onUnmounted(() => {
         <n-text depth="3">
           共 {{ total }} 条
         </n-text>
-      </n-space>
+      </div>
       <n-text
         v-else
         depth="3"
@@ -633,10 +633,8 @@ onUnmounted(() => {
             size="small"
             :show-feedback="false"
           >
-            <n-space
-              vertical
-              :size="12"
-            >
+            <!-- 不用 n-space：v-if 例句/错误提示随编辑状态切换会触发其重复渲染（包裹层 key 重复） -->
+            <div class="form-stack">
               <n-text strong>
                 {{ item.word }}
               </n-text>
@@ -692,7 +690,7 @@ onUnmounted(() => {
               >
                 {{ editError }}
               </n-alert>
-            </n-space>
+            </div>
           </n-form>
 
           <!-- 浏览态 -->
@@ -825,6 +823,21 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* 原 n-space（size=12）渲染出的等价 flex 布局（编辑表单纵向栈）。 */
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 原 n-space（size=12）渲染出的等价 flex 布局。 */
+.header-actions {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 12px;
+}
+
 /* 掌握度统计条：点击即筛 */
 .vocab-stat-row {
   display: flex;

@@ -94,9 +94,9 @@ function testResultText(id: string): string {
       >
         <div class="row">
           <div class="row-main">
-            <n-space
-              :size="6"
-              align="center"
+            <!-- 不用 n-space：v-if 标签（已存密钥）显隐切换会触发其重复渲染（包裹层 key 重复） -->
+            <div
+              class="provider-title-row"
               style="margin-bottom: 2px"
             >
               <n-text strong>
@@ -116,7 +116,7 @@ function testResultText(id: string): string {
               >
                 已存密钥
               </n-tag>
-            </n-space>
+            </div>
             <n-text
               depth="3"
               class="row-detail"
@@ -282,6 +282,14 @@ function testResultText(id: string): string {
 </template>
 
 <style scoped>
+/* 原 n-space（size=6）渲染出的等价 flex 布局。 */
+.provider-title-row {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .row {
   display: flex;
   justify-content: space-between;

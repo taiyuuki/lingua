@@ -12,7 +12,6 @@ import {
   NInputGroup,
   NProgress,
   NSelect,
-  NSpace,
   NText,
 } from "naive-ui";
 import {
@@ -92,10 +91,9 @@ async function browseDictionaryFile(): Promise<void> {
         size="small"
         :show-feedback="false"
       >
-        <n-space
-          vertical
-          :size="12"
-        >
+        <!-- naive-ui 的 n-space 会在 v-if 子项反复显隐时重复渲染（包裹层 key 重复），
+             导入页的按钮/进度/提示每次导入都会切换，必须用普通 flex 容器布局。 -->
+        <div class="form-stack">
           <n-form-item label="名称">
             <n-input
               v-model:value="form.name"
@@ -139,10 +137,9 @@ async function browseDictionaryFile(): Promise<void> {
             {{ formatHint }}
           </n-text>
 
-          <n-space
+          <div
             v-if="importing && importProgress"
-            vertical
-            :size="4"
+            class="progress-stack"
           >
             <n-text depth="3">
               {{ importProgress.phase === "parsing"
@@ -155,9 +152,9 @@ async function browseDictionaryFile(): Promise<void> {
               :height="8"
               :show-indicator="false"
             />
-          </n-space>
+          </div>
 
-          <n-space align="center">
+          <div class="action-row">
             <n-button
               v-if="!importing"
               type="primary"
@@ -188,7 +185,7 @@ async function browseDictionaryFile(): Promise<void> {
             >
               {{ importMessage }}
             </n-text>
-          </n-space>
+          </div>
           <n-alert
             v-if="importWarning"
             type="warning"
@@ -203,13 +200,33 @@ async function browseDictionaryFile(): Promise<void> {
           >
             {{ importError }}
           </n-alert>
-        </n-space>
+        </div>
       </n-form>
     </n-card>
   </div>
 </template>
 
 <style scoped>
+/* 三个容器是原 n-space 的等价 flex 布局（gap 对齐原渲染值）。 */
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.progress-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.action-row {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
 .format-hint {
   display: block;
   font-size: 12px;

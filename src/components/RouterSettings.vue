@@ -282,8 +282,9 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
         </n-button>
       </n-space>
 
-      <n-space
-        align="center"
+      <!-- 不用 n-space：v-if 提示反复显隐会触发其重复渲染（包裹层 key 重复） -->
+      <div
+        class="action-row"
         style="margin-top: 16px"
       >
         <n-button
@@ -299,7 +300,7 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
         >
           {{ saveMessage }}
         </n-text>
-      </n-space>
+      </div>
       <n-alert
         v-if="saveError"
         type="error"
@@ -311,3 +312,13 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
     </n-form>
   </n-card>
 </template>
+
+<style scoped>
+/* 原 n-space（默认 medium）渲染出的等价 flex 布局。 */
+.action-row {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+</style>
