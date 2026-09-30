@@ -152,7 +152,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::autostart_enabled,
             commands::set_autostart,
         ])
-        .run(tauri::generate_context!())?;
+        .build(tauri::generate_context!())?
+        .run(|_app, event| match event {
+            // macOS：主窗口隐藏（关闭即隐藏到托盘）后点扩展坞图标，系统只
+            // 激活应用、不唤出隐藏窗口 —— 在 Reopen 里补上。Popup 可见时
+            // has_visible_windows 也为 true，故不做判断、恒显示主窗口。
+            // 托盘点击不触发 Reopen，两条入口互补。
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => show_main_window(_app),
+            _ => {}
+        });
     Ok(())
 }
 
