@@ -37,7 +37,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
-            None,
+            // 登录启动带标记参数：setup 里据此让主窗口保持隐藏
+            // （托盘常驻应用，自启不出主界面）。
+            Some(vec!["--autostarted"]),
         ))
         .setup(|app| {
             init_tracing();
@@ -71,6 +73,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             register_shortcut_from_settings(app.handle(), &database)?;
 
             setup_tray(app)?;
+
+            // 主窗口按 tauri.conf.json 隐藏创建：手动启动在此显示；
+            // 开机自启（LaunchAgent 带 --autostarted）保持托盘静默。
+            // 否则主窗口「可见但垫底」，首次 popup set_focus 激活 App 时
+            // macOS 会把它连同 popup 一起带到前台。
+            if std::env::args().any(|argument| argument == "--autostarted") {
+                tracing::info!("autostarted launch: main window stays hidden");
+            } else {
+                show_main_window(app.handle());
+            }
 
             tracing::info!("lingua ready");
             Ok(())
