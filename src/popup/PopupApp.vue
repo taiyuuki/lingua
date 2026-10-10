@@ -53,6 +53,8 @@ const study = reactive({
   loading: false,
   error: "",
   data: null as StudyAnalysis | null,
+  // 被分析的词头/原句——面板标题行展示（state 可能随后变化，快照更稳）。
+  word: "",
 });
 
 /** 发起学习分析：单词用词典词头，其余用原文；带检测结果与译文。 */
@@ -68,6 +70,7 @@ async function runStudy(): Promise<void> {
   study.loading = true;
   study.error = "";
   study.data = null;
+  study.word = text;
   try {
     study.data = await analyzeStudy({
       text,
@@ -86,6 +89,7 @@ function closeStudy(): void {
   study.loading = false;
   study.error = "";
   study.data = null;
+  study.word = "";
 }
 
 function onActiveEntryChange(entry: DictionaryEntryDto | null): void {
@@ -435,6 +439,7 @@ function onToolbarMouseDown(event: MouseEvent): void {
       class="popup-scroll"
     >
       <StudyPanel
+        :word="study.word"
         :analysis="study.data"
         :loading="study.loading"
         :error="study.error"

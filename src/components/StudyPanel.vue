@@ -7,6 +7,8 @@ import type { StudyAnalysis } from "../lib/api";
  * 纯展示组件：加载/错误态由父级传入，关闭经 emit 上抛。
  */
 defineProps<{
+  /** 被分析的原文（词头或句子）——标题行展示。 */
+  word?: string;
   analysis: StudyAnalysis | null;
   loading: boolean;
   error: string;
@@ -28,10 +30,6 @@ const kindLabel = (kind: string | null): string =>
       >
         {{ kindLabel(analysis?.kind ?? null) }}
       </span>
-      <span
-        v-if="analysis?.phonetic"
-        class="study-phonetic"
-      >{{ analysis.phonetic }}</span>
       <span class="study-spacer" />
       <span
         v-if="analysis?.language"
@@ -53,6 +51,18 @@ const kindLabel = (kind: string | null): string =>
           <path d="M6 6l12 12M18 6L6 18" />
         </svg>
       </button>
+    </div>
+
+    <!-- 标题行：被分析的词 + 音标（句子分析时即原句） -->
+    <div
+      v-if="word"
+      class="study-word-row"
+    >
+      <span class="study-word">{{ word }}</span>
+      <span
+        v-if="analysis?.phonetic"
+        class="study-phonetic"
+      >{{ analysis.phonetic }}</span>
     </div>
 
     <div
@@ -77,13 +87,18 @@ const kindLabel = (kind: string | null): string =>
       v-else-if="analysis"
       class="study-body"
     >
-      <!-- 降级：模型输出无法结构化，展示原文 -->
-      <p
-        v-if="analysis.notes"
-        class="study-notes"
-      >
-        {{ analysis.notes }}
-      </p>
+        <!-- 降级：模型输出无法结构化，展示原文 -->
+        <div
+          v-if="analysis.notes"
+          class="study-block"
+        >
+          <p class="study-degrade-hint">
+            模型输出未能解析为结构化卡片，以下为原文：
+          </p>
+          <p class="study-notes">
+            {{ analysis.notes }}
+          </p>
+        </div>
 
       <template v-else>
         <!-- 词块 -->

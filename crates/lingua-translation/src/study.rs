@@ -48,7 +48,8 @@ pub struct StudySense {
     pub meaning: String,
     #[serde(default)]
     pub example: Option<String>,
-    #[serde(default)]
+    // snake_case 别名：prompt 早期版本用过下划线键名，部分模型仍会沿用。
+    #[serde(default, alias = "example_translation")]
     pub example_translation: Option<String>,
 }
 
@@ -93,7 +94,7 @@ pub struct StudyAnalysis {
     pub kind: Option<String>,
     pub language: Option<String>,
     pub phonetic: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "parts_of_speech")]
     pub parts_of_speech: Vec<String>,
     #[serde(default)]
     pub senses: Vec<StudySense>,
@@ -103,7 +104,7 @@ pub struct StudyAnalysis {
     #[serde(default)]
     pub synonyms: Vec<StudySynonym>,
     pub structure: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "key_phrases")]
     pub key_phrases: Vec<StudyKeyPhrase>,
     pub paraphrase: Option<String>,
     #[serde(default)]
@@ -177,32 +178,120 @@ impl StudyAnalyzer {
     }
 }
 
-/// 解析模型响应；`_model` 保留参数位（未来结果标注来源用）。
+/// 解析模型响应：提取首个配平的 JSON 对象，严格解析失败时
+/// 去掉尾随逗号再试一次；仍失败才降级 `notes`。`_model` 保留
+/// 参数位（未来结果标注来源用）。
 fn parse_study_analysis(content: String, _model: Option<String>) -> StudyAnalysis {
-    let Some(json_start) = content.find('{') else {
+    let Some(candidate) = extract_json_object(&content) else {
         return degraded(content);
     };
-    let Some(json_end) = content.rfind('}') else {
-        return degraded(content);
-    };
-    if json_end < json_start {
-        return degraded(content);
+    if let Ok(analysis) = serde_json::from_str::<StudyAnalysis>(candidate) {
+        return analysis;
     }
-    serde_json::from_str::<StudyAnalysis>(&content[json_start..=json_end])
-        .unwrap_or_else(|_| degraded(content))
+    let sanitized = strip_trailing_commas(candidate);
+    serde_json::from_str::<StudyAnalysis>(&sanitized).unwrap_or_else(|_| degraded(content))
+}
+
+/// 提取首个配平的 JSON 对象（字符串感知：字符串里的花括号与引号不参与配平）。
+/// 截断的对象不返回——半截 JSON 解析必败，交给调用方降级。
+fn extract_json_object(content: &str) -> Option<&str> {
+    let mut start = None;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, character) in content.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' => {
+                if depth == 0 {
+                    start = Some(index);
+                }
+                depth += 1;
+            }
+            '}' => {
+                if depth > 0 {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(&content[start?..=index]);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 删除 `}` / `]` 前的尾随逗号（仅限字符串外）——大模型高频的 JSON 偏差。
+fn strip_trailing_commas(json: &str) -> String {
+    let characters: Vec<char> = json.chars().collect();
+    let mut out = String::with_capacity(json.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut index = 0;
+    while index < characters.len() {
+        let character = characters[index];
+        if in_string {
+            out.push(character);
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if character == ',' {
+            let mut lookahead = index + 1;
+            while lookahead < characters.len() && characters[lookahead].is_whitespace() {
+                lookahead += 1;
+            }
+            if lookahead < characters.len()
+                && (characters[lookahead] == '}' || characters[lookahead] == ']')
+            {
+                index += 1;
+                continue;
+            }
+        }
+        if character == '"' {
+            in_string = true;
+        }
+        out.push(character);
+        index += 1;
+    }
+    out
 }
 
 /// 降级：结构化解析失败时保留原文，让用户至少看到模型说了什么。
+/// 代码围栏先剥掉——降级展示的是内容，不是 markdown 语法。
 fn degraded(content: String) -> StudyAnalysis {
     let trimmed = content.trim();
-    if trimmed.is_empty() {
+    let unfenced = if let Some(rest) = trimmed.strip_prefix("```") {
+        let body = rest.split_once('\n').map_or(rest, |(_, tail)| tail);
+        body.trim_end().strip_suffix("```").unwrap_or(body)
+    } else {
+        trimmed
+    };
+    if unfenced.is_empty() {
         return StudyAnalysis {
             notes: Some("（模型没有返回内容）".to_string()),
             ..StudyAnalysis::default()
         };
     }
     StudyAnalysis {
-        notes: Some(trimmed.to_string()),
+        notes: Some(unfenced.to_string()),
         ..StudyAnalysis::default()
     }
 }
@@ -329,5 +418,54 @@ mod tests {
         let analysis = degraded("  ".to_string());
         assert!(analysis.is_degraded());
         assert!(analysis.notes.unwrap().contains("没有返回内容"));
+    }
+
+    #[test]
+    fn parse_recovers_trailing_commas() {
+        let analysis = parse_study_analysis(
+            "{\"kind\": \"word\", \"senses\": [{\"meaning\": \"短暂的\",},],}".into(),
+            None,
+        );
+        assert!(!analysis.is_degraded());
+        assert_eq!(analysis.senses.len(), 1);
+    }
+
+    #[test]
+    fn parse_ignores_prose_after_json() {
+        // JSON 之后跟着含花括号的说明文字：只取首个配平对象。
+        let analysis = parse_study_analysis(
+            "{\"kind\": \"word\", \"senses\": [{\"meaning\": \"短暂的\"}]} 以上是分析 {完}".into(),
+            None,
+        );
+        assert!(!analysis.is_degraded());
+        assert_eq!(analysis.senses[0].meaning, "短暂的");
+    }
+
+    #[test]
+    fn parse_accepts_snake_case_keys() {
+        // prompt 早期 Rules 用过 snake_case，模型可能沿用。
+        let analysis = parse_study_analysis(
+            "{\"kind\": \"sentence\", \"key_phrases\": [{\"phrase\": \"on the fence\"}]}".into(),
+            None,
+        );
+        assert!(!analysis.is_degraded());
+        assert_eq!(analysis.key_phrases[0].phrase, "on the fence");
+    }
+
+    #[test]
+    fn braces_inside_strings_do_not_break_extraction() {
+        let analysis = parse_study_analysis(
+            "{\"kind\": \"word\", \"mnemonics\": \"记 {花括号} 也不影响\"}".into(),
+            None,
+        );
+        assert!(!analysis.is_degraded());
+        assert!(analysis.mnemonics.unwrap().contains("花括号"));
+    }
+
+    #[test]
+    fn degraded_notes_strip_code_fences() {
+        let analysis = degraded("```json\n{\"broken\":\n".into());
+        assert!(analysis.is_degraded());
+        assert!(!analysis.notes.unwrap().contains("```"));
     }
 }

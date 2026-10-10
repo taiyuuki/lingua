@@ -45,10 +45,11 @@ JSON schema (omit fields that do not apply; do not invent empty ones):
 }
 
 Rules:
-1. For a single word or short phrase: fill phonetic, parts_of_speech, senses
+1. For a single word or short phrase: fill phonetic, partsOfSpeech, senses
    (1-3 senses), morphology (skip for non-derived words), collocations (up to 4),
    synonyms (up to 3, may be empty), mnemonics.
-2. For a sentence: fill structure, key_phrases (up to 4), paraphrase (skip if the
+2. For a sentence: fill structure, keyPhrases (up to 4), paraphrase (skip if the
    sentence is already simple), examples (up to 2 analogous sentences), mnemonics.
 3. If `translation` is provided, build on it and stay consistent with it.
 4. Never add fields not in the schema; never wrap the JSON in fences.
+5. Emit standard strict JSON: no trailing commas, no comments, no smart quotes.
