@@ -71,6 +71,15 @@ export const useSettingsStore = defineStore("settings", () => {
   const ocrHttpUrl = ref("http://127.0.0.1:8433/ocr");
   const autoVocabulary = ref(false);
 
+  /** 刷新划词权限状态：授权面板跳转回来后轮询复用。 */
+  async function refreshPermission(): Promise<void> {
+    try {
+      permissionGranted.value = await selectionPermissionStatus();
+    } catch {
+      permissionGranted.value = null;
+    }
+  }
+
   async function load(): Promise<void> {
     loadError.value = null;
     try {
@@ -95,11 +104,7 @@ export const useSettingsStore = defineStore("settings", () => {
     } catch (error) {
       loadError.value = describeError(error);
     }
-    try {
-      permissionGranted.value = await selectionPermissionStatus();
-    } catch {
-      permissionGranted.value = null;
-    }
+    await refreshPermission();
   }
 
   async function save(): Promise<void> {
@@ -159,5 +164,6 @@ export const useSettingsStore = defineStore("settings", () => {
     autoVocabulary,
     load,
     save,
+    refreshPermission,
   };
 });

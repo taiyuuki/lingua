@@ -3,7 +3,7 @@ import { onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useAppStore } from "../stores/app";
 import { useSettingsStore } from "../stores/settings";
-import { screenRecordingStatus, startOcrCapture } from "../lib/api";
+import { screenRecordingStatus, startOcrCapture, openAccessibilitySettings } from "../lib/api";
 
 const appStore = useAppStore();
 const { appInfo, errorMessage } = storeToRefs(appStore);
@@ -30,6 +30,17 @@ async function startOcr(): Promise<void> {
     ocrError.value = String(error);
   }
   void refreshScreenRecording();
+}
+
+/** 跳转辅助功能授权面板；系统设置里勾选后回来轮询，警告条自动消失。 */
+async function openPermissionSettings(): Promise<void> {
+  await openAccessibilitySettings();
+  for (let i = 0; i < 10 && !settings.permissionGranted; i += 1) {
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 2000);
+    });
+    await settings.refreshPermission();
+  }
 }
 
 onMounted(() => {
@@ -73,8 +84,15 @@ onMounted(() => {
         type="warning"
         :show-icon="true"
       >
-        缺少辅助功能权限：请在「系统设置 → 隐私与安全性 → 辅助功能」中授权
-        Lingua，否则无法读取选中文本。
+        缺少辅助功能权限：请在「系统设置 → 隐私与安全性」中授权 Lingua
+        （新版 macOS 位于「设备控制和数据访问」），否则无法读取选中文本。
+        <n-button
+          size="tiny"
+          type="primary"
+          @click="openPermissionSettings"
+        >
+          打开系统设置
+        </n-button>
       </n-alert>
       <n-alert
         v-if="errorMessage"

@@ -562,6 +562,16 @@ pub async fn selection_permission_status() -> Result<bool, AppError> {
     Ok(lingua_platform::selection_permission_granted())
 }
 
+/// 打开划词权限（macOS 辅助功能）的系统设置面板。
+/// 先带 prompt 请求一次：把当前应用注册进辅助功能列表（未勾选），
+/// 避免「旧签名残留条目开着、新应用不在列表」的错位；再直达面板。
+#[tauri::command]
+pub async fn open_accessibility_settings() -> Result<(), AppError> {
+    lingua_platform::request_selection_permission();
+    lingua_platform::open_accessibility_settings();
+    Ok(())
+}
+
 // ---------- 词典管理（Phase 3） ----------
 
 #[tauri::command]

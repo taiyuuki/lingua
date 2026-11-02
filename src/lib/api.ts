@@ -282,6 +282,11 @@ export async function selectionPermissionStatus(): Promise<boolean> {
   return invoke<boolean>("selection_permission_status");
 }
 
+/** 打开划词权限（macOS 辅助功能）的系统设置面板；其它平台无操作。 */
+export async function openAccessibilitySettings(): Promise<void> {
+  await invoke<void>("open_accessibility_settings");
+}
+
 export async function screenRecordingStatus(): Promise<boolean> {
   return invoke<boolean>("screen_recording_status");
 }

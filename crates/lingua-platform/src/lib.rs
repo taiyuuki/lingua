@@ -19,7 +19,7 @@ pub mod windows;
 pub use capture::{
     capture_region, crop_image, request_screen_recording_access, screen_recording_granted,
 };
-pub use os::{Os, current_os};
+pub use os::{Os, current_os, open_accessibility_settings};
 pub use selection::SelectionProvider;
 pub use selection_service::SelectionService;
 pub use unsupported::UnsupportedSelectionProvider;
@@ -56,6 +56,16 @@ pub fn create_default_selection_service() -> SelectionService {
 pub fn selection_permission_granted() -> bool {
     #[cfg(target_os = "macos")]
     return macos::ffi::is_accessibility_trusted();
+
+    #[cfg(not(target_os = "macos"))]
+    true
+}
+
+/// 请求划词权限（macOS：prompt=true 注册并引导；其它平台无操作）。
+/// 返回请求后的授权状态。
+pub fn request_selection_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    return macos::ffi::request_accessibility_access();
 
     #[cfg(not(target_os = "macos"))]
     true

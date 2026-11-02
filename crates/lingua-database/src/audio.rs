@@ -84,7 +84,7 @@ impl Database {
             for record in &ordered {
                 written +=
                     statement.execute(params![id, record.word_lower, record.accent, record.resource_path])
-                        .map_err(db_err)? as usize;
+                        .map_err(db_err)?;
             }
             written
         };

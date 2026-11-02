@@ -852,6 +852,21 @@ body {
   color: var(--color-warn-text);
 }
 
+.popup-error-btn {
+  margin-top: 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.popup-error-btn:hover {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
 /* 底栏 */
 .popup-footer {
   display: flex;

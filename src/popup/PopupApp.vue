@@ -8,6 +8,7 @@ import {
   isWord,
   latestPopupState,
   latestStreamed,
+  openAccessibilitySettings,
   ocrRetryAvailable,
   ocrSourceInfo,
   onPopupDelta,
@@ -616,8 +617,17 @@ function onToolbarMouseDown(event: MouseEvent): void {
         v-if="state.kind === 'permission'"
         class="popup-error-hint"
       >
-        macOS 需要在「系统设置 → 隐私与安全性」中授权本应用。
+        macOS 需要在「系统设置 → 隐私与安全性」中授权本应用
+        （新版 macOS 位于「设备控制和数据访问」）。
       </p>
+      <button
+        v-if="state.kind === 'permission'"
+        class="popup-error-btn"
+        type="button"
+        @click="openAccessibilitySettings"
+      >
+        打开系统设置
+      </button>
     </div>
 
     <!-- 底栏 -->

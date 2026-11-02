@@ -25,6 +25,27 @@ pub fn current_os() -> Os {
     }
 }
 
+/// 打开划词权限对应的系统设置面板（macOS：隐私与安全性 →
+/// 辅助功能；macOS 26+ 该项并入「设备控制和数据访问」，
+/// 手翻设置树难找，URL 直达）。其它平台划词无需授权，无操作。
+pub fn open_accessibility_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        // Ventura+ 的新 URL 格式；旧 com.apple.preference.security
+        // 在 macOS 26 已失效（open 会落到错误的 handler）。
+        let _ = std::process::Command::new("open")
+            .arg(
+                "x-apple.systempreferences:com.apple.settings.\
+                 PrivacySecurity.extension?Privacy_Accessibility",
+            )
+            .spawn();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Windows / Linux：无系统级划词授权，保持静默。
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]

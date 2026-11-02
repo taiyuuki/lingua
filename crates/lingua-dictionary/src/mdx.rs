@@ -608,7 +608,7 @@ pub fn extract_mdd_resources(mdd_path: &Path, out_dir: &Path) -> AppResult<usize
 
     // 按偏移排序后逐 record 块顺序解包（同偏移别名去重）。
     let mut keys = container.keys;
-    keys.sort_by(|a, b| a.1.cmp(&b.1));
+    keys.sort_by_key(|a| a.1);
     let mut unique: Vec<(String, u64)> = Vec::with_capacity(keys.len());
     for (path, offset) in keys {
         if unique.last().is_none_or(|&(_, prev)| prev != offset) {
@@ -682,7 +682,7 @@ impl MdxFile {
         } = container;
 
         // 同一 record 偏移的多个词头合并：首词头作 lemma，其余作词形变化。
-        keys.sort_by(|a, b| a.1.cmp(&b.1));
+        keys.sort_by_key(|a| a.1);
         let mut groups: Vec<KeyGroup> = Vec::new();
         for (lemma, offset) in keys {
             match groups.last_mut() {

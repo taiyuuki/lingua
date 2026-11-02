@@ -218,12 +218,10 @@ fn extract_json_object(content: &str) -> Option<&str> {
                 }
                 depth += 1;
             }
-            '}' => {
-                if depth > 0 {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(&content[start?..=index]);
-                    }
+            '}' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&content[start?..=index]);
                 }
             }
             _ => {}

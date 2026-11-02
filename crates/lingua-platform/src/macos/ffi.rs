@@ -97,6 +97,17 @@ pub fn is_accessibility_trusted() -> bool {
     unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as *const c_void) != 0 }
 }
 
+/// 请求辅助功能权限（prompt=true）：未授权时系统把本应用注册进
+/// 辅助功能列表（未勾选）并弹引导，用户只需打开开关；已授权时
+/// 无副作用。返回当前是否已授权。签名变更（重装）后旧条目失效，
+/// 这是让新条目出现在列表里的官方途径。
+pub fn request_accessibility_access() -> bool {
+    let prompt_key = CFString::new("AXTrustedCheckOptionPrompt");
+    let pairs = [(prompt_key, CFBoolean::true_value())];
+    let options = CFDictionary::from_CFType_pairs(&pairs);
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as *const c_void) != 0 }
+}
+
 /// 屏幕录制权限是否已授予（OCR 截图需要）。
 pub fn is_screen_recording_granted() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }

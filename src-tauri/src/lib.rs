@@ -121,6 +121,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::latest_streamed,
             commands::latest_popup_state,
             commands::selection_permission_status,
+            commands::open_accessibility_settings,
             commands::list_providers,
             commands::save_provider,
             commands::delete_provider,
