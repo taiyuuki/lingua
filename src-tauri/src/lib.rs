@@ -32,6 +32,13 @@ pub struct TrayState {
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
+        // 单实例守卫必须最先注册：第二个进程启动即静默退出。
+        // 兜底登录时 LaunchAgent 与「重新打开窗口」会话恢复的双启竞态。
+        // 回调不弹主窗口——自启路径要保持托盘静默；用户唤出已有实例
+        // 走 Dock（Reopen）与托盘的既有路径。
+        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {
+            tracing::info!("duplicate launch suppressed; existing instance keeps running");
+        }))
         .register_uri_scheme_protocol("mdx-res", handle_mdx_resource)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
