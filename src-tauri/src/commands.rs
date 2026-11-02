@@ -2012,12 +2012,14 @@ mod tests {
 
     #[test]
     fn generated_ids_are_slugged_and_stable() {
-        let a = generate_dictionary_id(r"C:\dicts\Oxford Advanced.mdx");
-        let b = generate_dictionary_id(r"D:\other\Oxford Advanced.mdx");
+        // 正斜杠在 Windows / macOS 的 Path 里都是分隔符：断言跨平台一致
+        // （反斜杠路径在 macOS 上整个是文件名，slug 结果不同）。
+        let a = generate_dictionary_id("/dicts/Oxford Advanced.mdx");
+        let b = generate_dictionary_id("/other/Oxford Advanced.mdx");
         assert!(a.starts_with("oxford-advanced-"), "{a}");
         assert_eq!(a, b, "同名文件 → 同 id（重导覆盖更新）");
         // 纯中文文件名 slug 化为空，回退 dict- 前缀。
-        let cjk = generate_dictionary_id(r"C:\词库\牛津高阶.mdx");
+        let cjk = generate_dictionary_id("/词库/牛津高阶.mdx");
         assert!(cjk.starts_with("dict-"), "{cjk}");
         let tsv = generate_dictionary_id("my_words.tsv");
         assert!(tsv.starts_with("my-words-"), "{tsv}");
@@ -2030,7 +2032,7 @@ mod tests {
             name: "".into(),
             source_language: Language::En,
             gloss_language: Language::Zh,
-            path: r"C:\d\My Dict.mdx".into(),
+            path: "/d/My Dict.mdx".into(),
         };
         let (id, name) = resolve_dictionary_identity(&request);
         assert!(id.starts_with("my-dict-"), "{id}");
