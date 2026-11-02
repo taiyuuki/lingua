@@ -49,6 +49,8 @@ jobs:
       - name: 构建并发布
         uses: tauri-apps/tauri-action@v0
         env:
+          # tauri-action 创建 Release / 上传资产必需（Actions 自动注入的临时 token）。
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 更新包的 minisign 签名私钥（与 tauri.conf.json 里的 pubkey 配对）。
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           # 密钥为空密码，此 secret 无需创建（GitHub 也不允许空 secret）：
