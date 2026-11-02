@@ -66,7 +66,8 @@ jobs:
           releaseBody: "详见提交历史。"
           releaseDraft: false
           prerelease: false
-          # 生成 latest.json 供应用内更新器使用（Windows 优先 NSIS 安装器）。
-          includeUpdaterJson: true
-          updaterJsonPreferNsr: true
+          # 生成 latest.json 供应用内更新器使用；
+          # Windows 优先 NSIS 安装器（MSI 为 v2 更新器的遗留路径）。
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
