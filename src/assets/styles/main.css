@@ -123,6 +123,15 @@ body {
   font-weight: 600;
 }
 
+/* 「设置」项的新版本红点（状态来自 updater store）。 */
+.menu-update-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--color-danger, #e5484d);
+}
+
 .app-sidebar-footer {
   margin-top: auto;
   padding: 12px 18px;

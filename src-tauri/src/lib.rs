@@ -42,6 +42,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .register_uri_scheme_protocol("mdx-res", handle_mdx_resource)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        // 更新器：endpoint 与公钥在 tauri.conf.json plugins.updater；
+        // 安装完成后经 process 插件 relaunch 重启到新版本。
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             // 登录启动带标记参数：setup 里据此让主窗口保持隐藏

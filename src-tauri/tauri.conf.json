@@ -31,6 +31,7 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "createUpdaterArtifacts": true,
     "macOS": {
       "signingIdentity": "BB7B7C46B129E5FF2A1690EAFCF4DA633A7D10A1"
     },
@@ -41,5 +42,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMEI1MUI4NzBBRTBCNzEKUldSeEM2NXd1RkVManlqTitTa0xrbE1TM3pvWnhLR3M1YXp5a2krRVErNmZoRktuNzRGWnRLL08K",
+      "endpoints": [
+        "https://github.com/taiyuuki/lingua/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

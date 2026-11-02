@@ -1,0 +1,70 @@
+name: Release
+
+# 推送 v* tag 触发：tauri-action 构建各平台安装包并发布 GitHub Release，
+# 同时生成 latest.json（应用内更新器的清单，endpoint 指向该文件）。
+# 发版流程见 docs/RELEASE.md。
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest # arm64 runner，出 universal 包
+            args: --target universal-apple-darwin
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # universal 需要两个架构的 std。
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建并发布
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # 更新包的 minisign 签名私钥（与 tauri.conf.json 里的 pubkey 配对）。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # 密钥为空密码，此 secret 无需创建（GitHub 也不允许空 secret）：
+          # env 显式列出 → 变量必被定义为空字符串 → CLI 走空密码路径。
+          # 切勿设占位符（如 "none"）——那会被当作真实密码导致解密失败。
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # runner 上没有本地钥匙串证书：ad-hoc 签名（覆盖 tauri.conf.json
+          # 的 signingIdentity）。更新包完整性由 minisign 保证，不受影响。
+          APPLE_SIGNING_IDENTITY: "-"
+        with:
+          tagName: v__VERSION__
+          releaseName: "Lingua v__VERSION__"
+          releaseBody: "详见提交历史。"
+          releaseDraft: false
+          prerelease: false
+          # 生成 latest.json 供应用内更新器使用（Windows 优先 NSIS 安装器）。
+          includeUpdaterJson: true
+          updaterJsonPreferNsr: true
+          args: ${{ matrix.args }}

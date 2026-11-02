@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import RouterSettings from "../components/RouterSettings.vue";
+import UpdateChecker from "../components/UpdateChecker.vue";
 </script>
 
 <template>
@@ -11,5 +12,6 @@ import RouterSettings from "../components/RouterSettings.vue";
       </p>
     </header>
     <RouterSettings />
+    <UpdateChecker />
   </div>
 </template>

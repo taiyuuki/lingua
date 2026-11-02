@@ -3,10 +3,14 @@ import { computed, onMounted } from "vue";
 import { darkTheme, dateZhCN, zhCN, type GlobalThemeOverrides } from "naive-ui";
 import { storeToRefs } from "pinia";
 import { useSettingsStore } from "./stores/settings";
+import { useUpdaterStore } from "./stores/updater";
 
 // 应用壳：侧边栏导航 + 路由视图；Naive 主题跟随设置（light/dark）。
 const settings = useSettingsStore();
 const { uiTheme } = storeToRefs(settings);
+
+const updater = useUpdaterStore();
+const { hasUpdate } = storeToRefs(updater);
 
 const naiveTheme = computed(() => (uiTheme.value === "dark" ? darkTheme : null));
 const themeOverrides = computed<GlobalThemeOverrides>(() =>
@@ -40,6 +44,9 @@ const menu = [
 onMounted(() => {
   // 尽早加载设置：Naive 主题与 data-theme（Popup/OCR 样式令牌）都依赖它。
   void settings.load();
+  // 延迟静默检查更新：不与启动期 IPC 抢通道，失败不打扰用户；
+  // 有新版本时「设置」菜单出现红点，入口在设置页的「关于与更新」。
+  window.setTimeout(() => void updater.check(true), 3000);
 });
 </script>
 
@@ -75,6 +82,10 @@ onMounted(() => {
               <path :d="item.icon" />
             </svg>
             <span>{{ item.label }}</span>
+            <span
+              v-if="item.path === '/settings' && hasUpdate"
+              class="menu-update-dot"
+            />
           </RouterLink>
         </nav>
         <div class="app-sidebar-footer">

@@ -6,6 +6,8 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 
 export interface AppInfo {
   name: string;
@@ -252,6 +254,56 @@ export async function getAppInfo(): Promise<AppInfo> {
 
 export async function getDatabaseStatus(): Promise<DatabaseStatus> {
   return invoke<DatabaseStatus>("database_status");
+}
+
+/** 更新清单（`@tauri-apps/plugin-updater` Update 的子集）。 */
+export interface UpdateManifest {
+  version: string;
+  /** 发布时间（ISO 8601，来自 GitHub Release）。 */
+  date: string | null;
+  /** Release 说明。 */
+  body: string | null;
+}
+
+/**
+ * 检查更新：无新版本返回 null。
+ * endpoint 与公钥配置在 `tauri.conf.json plugins.updater`。
+ */
+export async function checkForUpdates(): Promise<UpdateManifest | null> {
+  const update = await check();
+  if (!update) {
+    return null;
+  }
+  return { version: update.version, date: update.date ?? null, body: update.body ?? null };
+}
+
+/** 下载进度回调，ratio ∈ [0, 1]；安装完成后自动重启应用。 */
+export async function downloadAndInstallUpdate(
+  onProgress: (ratio: number) => void,
+): Promise<void> {
+  const update = await check();
+  if (!update) {
+    return;
+  }
+  let received = 0;
+  let total = 0;
+  await update.downloadAndInstall((event) => {
+    switch (event.event) {
+      case "Started":
+        total = event.data.contentLength ?? 0;
+        break;
+      case "Progress":
+        received += event.data.chunkLength;
+        break;
+      case "Finished":
+        onProgress(1);
+        return;
+    }
+    if (total > 0) {
+      onProgress(received / total);
+    }
+  });
+  await relaunch();
 }
 
 export async function listProviders(): Promise<ProviderDto[]> {
