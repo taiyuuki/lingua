@@ -2520,7 +2520,7 @@ dependencies = [
 
 [[package]]
 name = "lingua"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "lingua-ai",
  "lingua-core",
@@ -2548,7 +2548,7 @@ dependencies = [
 
 [[package]]
 name = "lingua-ai"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -2562,7 +2562,7 @@ dependencies = [
 
 [[package]]
 name = "lingua-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2571,7 +2571,7 @@ dependencies = [
 
 [[package]]
 name = "lingua-database"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "lingua-ai",
  "lingua-core",
@@ -2583,7 +2583,7 @@ dependencies = [
 
 [[package]]
 name = "lingua-dictionary"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ammonia",
  "async-trait",
@@ -2599,7 +2599,7 @@ dependencies = [
 
 [[package]]
 name = "lingua-ocr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "lingua-ai",
@@ -2613,7 +2613,7 @@ dependencies = [
 
 [[package]]
 name = "lingua-platform"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arboard",
  "async-trait",
@@ -2628,7 +2628,7 @@ dependencies = [
 
 [[package]]
 name = "lingua-secrets"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "keyring",
  "lingua-core",
@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "lingua-translation"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "lingua-ai",
