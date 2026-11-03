@@ -66,6 +66,10 @@ export const useSettingsStore = defineStore("settings", () => {
   const shortcut = ref("alt+t");
   const ocrShortcut = ref("alt+s");
   const uiTheme = ref("dark");
+  /** 已应用（渲染中）的主题：uiTheme 只是表单值，未保存不应换肤。
+   *  App.vue 的 Naive 主题绑这里，与 data-theme 令牌同生共死，
+   *  否则下拉一选 Naive 组件先变、点保存其余样式才变。 */
+  const appliedTheme = ref("dark");
   const ocrProvider = ref("tesseract");
   const ocrTesseractPath = ref("tesseract");
   const ocrHttpUrl = ref("http://127.0.0.1:8433/ocr");
@@ -95,7 +99,8 @@ export const useSettingsStore = defineStore("settings", () => {
       shortcut.value = settings.shortcut;
       ocrShortcut.value = settings.ocrShortcut;
       uiTheme.value = normalizeTheme(settings.uiTheme);
-      applyTheme(uiTheme.value);
+      appliedTheme.value = uiTheme.value;
+      applyTheme(appliedTheme.value);
       ocrProvider.value = settings.ocrProvider;
       ocrTesseractPath.value = settings.ocrTesseractPath;
       ocrHttpUrl.value = settings.ocrHttpUrl;
@@ -130,7 +135,9 @@ export const useSettingsStore = defineStore("settings", () => {
         autoVocabulary: autoVocabulary.value,
       });
       saveMessage.value = "已保存";
-      applyTheme(uiTheme.value);
+      // 保存成功才算「已应用」：Naive 主题与 data-theme 令牌同时切换。
+      appliedTheme.value = uiTheme.value;
+      applyTheme(appliedTheme.value);
       // 主窗口应用后广播，Popup 等其它窗口同步切换。
       await broadcastThemeChanged(uiTheme.value);
     } catch (error) {
@@ -158,6 +165,7 @@ export const useSettingsStore = defineStore("settings", () => {
     shortcut,
     ocrShortcut,
     uiTheme,
+    appliedTheme,
     ocrProvider,
     ocrTesseractPath,
     ocrHttpUrl,

@@ -8,8 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
 
 /// 与前端 popup 样式约定一致的窗口尺寸（逻辑像素）。
-pub const POPUP_WIDTH: f64 = 560.0;
-pub const POPUP_HEIGHT: f64 = 480.0;
+/// 560/480 是卡片视觉尺寸；+24 给 .popup-root 四周 12px 的
+/// CSS 投影留边（系统阴影已关，避免圆角外的白色尖角）。
+pub const POPUP_WIDTH: f64 = 584.0;
+pub const POPUP_HEIGHT: f64 = 504.0;
 /// Popup 事件通道（前端 `listen("popup://state")`）。
 pub const POPUP_EVENT: &str = "popup://state";
 
@@ -115,6 +117,9 @@ pub fn ensure_window(app: &AppHandle) -> AppResult<WebviewWindow> {
     .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
     .decorations(false)
     .transparent(true) // 圆角：页面根节点 border-radius 裁剪（需 macOSPrivateApi）
+    // 系统阴影按矩形窗口采样，会在圆角外的透明区留下白色尖角
+    // （暗色主题下可见）；投影改由 .popup-root 的 box-shadow 自绘。
+    .shadow(false)
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(true) // 可临时调节；每次重新弹出时重置为默认尺寸

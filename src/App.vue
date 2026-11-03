@@ -5,16 +5,18 @@ import { storeToRefs } from "pinia";
 import { useSettingsStore } from "./stores/settings";
 import { useUpdaterStore } from "./stores/updater";
 
-// 应用壳：侧边栏导航 + 路由视图；Naive 主题跟随设置（light/dark）。
+// 应用壳：侧边栏导航 + 路由视图；Naive 主题跟随「已应用」主题（light/dark）。
+// 绑 appliedTheme 而非表单值 uiTheme：设置页选主题未保存时不换肤，
+// 与 data-theme 令牌（load/save 时才切换）保持一致。
 const settings = useSettingsStore();
-const { uiTheme } = storeToRefs(settings);
+const { appliedTheme } = storeToRefs(settings);
 
 const updater = useUpdaterStore();
 const { hasUpdate } = storeToRefs(updater);
 
-const naiveTheme = computed(() => (uiTheme.value === "dark" ? darkTheme : null));
+const naiveTheme = computed(() => (appliedTheme.value === "dark" ? darkTheme : null));
 const themeOverrides = computed<GlobalThemeOverrides>(() =>
-  uiTheme.value === "dark"
+  appliedTheme.value === "dark"
     ? {
         common: {
           primaryColor: "#7f97ff",
