@@ -174,8 +174,18 @@ pub async fn list_providers(
             .list_providers()?
             .into_iter()
             .map(|record| {
+                // Key 读取失败（如用户拒绝钥匙串授权）不能炸整个列表——
+                // 那会让设置页显示「服务全部消失」；按「未配置」展示并记日志。
                 let has_api_key = secrets
-                    .get_secret(&SecretRef::provider(&record.id))?
+                    .get_secret(&SecretRef::provider(&record.id))
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(
+                            provider = %record.id,
+                            error = %error,
+                            "failed to read api key status"
+                        );
+                        None
+                    })
                     .is_some();
                 Ok(ProviderDto::from_record(record, has_api_key))
             })

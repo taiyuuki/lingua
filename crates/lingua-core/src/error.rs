@@ -29,6 +29,10 @@ pub enum AppError {
     Platform(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// 服务未配置或不可用（如没有任何 Provider、API Key 读取被拒绝）。
+    /// 与 Authentication 区分：不是凭证错了，是根本没有可用的服务。
+    #[error("service not configured: {0}")]
+    Config(String),
     /// 触发划词时没有任何选中文本。这是高频正常情况，
     /// 单列变体让前端给出温和提示而不是报错。
     #[error("no text is selected")]
@@ -51,6 +55,7 @@ impl AppError {
             AppError::Permission(_) => "permission",
             AppError::Platform(_) => "platform",
             AppError::InvalidInput(_) => "invalid_input",
+            AppError::Config(_) => "config",
             AppError::NoSelection => "no_selection",
             AppError::Timeout(_) => "timeout",
             AppError::Internal(_) => "internal",

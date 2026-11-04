@@ -78,6 +78,9 @@ async fn run(app: &AppHandle) -> AppResult<()> {
     );
 
     // 2. 立即弹 popup 展示原文（流式：译文随后增量到达）。
+    //    Keychain 读 Key 可能触发授权面板（dev 下用户可能搁置不点，
+    //    面板会一直等），不能让它挡住弹窗——弹窗永远最先出现；
+    //    面板对 WKWebView 透明的扰动由 show() 后的每次重设兜底。
     popup::show(
         app,
         PopupState::Loading {
@@ -86,27 +89,60 @@ async fn run(app: &AppHandle) -> AppResult<()> {
     )
     .await?;
 
-    // 3. 经 Router 选出 Translate 任务的 Provider，组装引擎并翻译。
-    //    引擎内部先查词典（单词 + 命中时直接返回），否则走 AI；
-    //    同语言换向由 Prompt 指令层处理（设置里可关）。
-    let router = build_router(&state.database)?;
-    let provider = router.provider_for(AiTask::Translate)?;
-    let dictionary: Arc<dyn lingua_dictionary::DictionaryProvider> =
-        Arc::new(SqliteDictionaryProvider::new(state.database.clone()));
-    let engine = TranslationEngine::new(provider)
-        .with_dictionary(Some(dictionary))
+    // 3. 先查词典（不碰 Keychain——单词/词组命中即出结果，授权面板
+    //    被搁置也拖不慢词典）。
+    let request = TranslationRequest::new(
+        selected.text.clone(),
+        target_language(&state.database)?,
+    );
+    let dictionary_probe = TranslationEngine::without_provider().with_dictionary(Some(Arc::new(
+        SqliteDictionaryProvider::new(state.database.clone()),
+    )));
+    let dictionary_hit = dictionary_probe.lookup_dictionary(&request).await;
+
+    // 4. 词典未命中才组装 Router 与 AI 引擎（Key 读取带 2s 超时：授权
+    //    面板被搁置时降级，不让弹窗永远停在「翻译中」）。没有可用
+    //    Provider（未配置 / Key 被拒 / 超时）时词典-only 引擎报配置
+    //    错误，给用户明确指引。
+    let result = if let Some(hit) = dictionary_hit {
+        hit
+    } else {
+        let database_for_router = state.database.clone();
+        let engine = match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            tauri::async_runtime::spawn_blocking(move || {
+                build_router(&database_for_router)
+                    .and_then(|router| router.provider_for(AiTask::Translate))
+            }),
+        )
+        .await
+        {
+            Err(_) => {
+                tracing::warn!("router build timed out (keychain prompt pending?)");
+                TranslationEngine::without_provider()
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(error = %error, "router task failed");
+                TranslationEngine::without_provider()
+            }
+            Ok(Ok(Err(error))) => {
+                tracing::warn!(error = %error, "no usable translate provider");
+                TranslationEngine::without_provider()
+            }
+            Ok(Ok(Ok(provider))) => TranslationEngine::new(provider),
+        }
         .with_swap_language(swap_language(&state.database))
         .with_prompt_override(prompt_override(&state.database));
-    let request = TranslationRequest::new(selected.text, target_language(&state.database)?);
-    let app_for_delta = app.clone();
-    let result = engine
-        .translate_stream(&request, &mut |text: String| {
-            crate::popup::set_streamed(&text);
-            if let Err(error) = app_for_delta.emit("popup://delta", text) {
-                tracing::warn!(error = %error, "failed to emit popup delta");
-            }
-        })
-        .await?;
+        let app_for_delta = app.clone();
+        engine
+            .translate_stream(&request, &mut |text: String| {
+                crate::popup::set_streamed(&text);
+                if let Err(error) = app_for_delta.emit("popup://delta", text) {
+                    tracing::warn!(error = %error, "failed to emit popup delta");
+                }
+            })
+            .await?
+    };
 
     // 4. 单词查询自动记入生词本（短语/句子不记；可在设置里关，默认关）；
     //    在 result 移入 popup 前先取出需要的数据，写库放在 popup 展示之后。
@@ -206,7 +242,19 @@ pub fn build_router(database: &Database) -> AppResult<AIRouter> {
     let mut builder = AIRouter::builder();
     for record in database.list_providers()? {
         let mut config = record.to_config();
-        config.api_key = secrets.get_secret(&SecretRef::provider(&record.id))?;
+        // 单个 Provider 的 Key 读取失败（如用户拒绝钥匙串授权）只跳过
+        // 该 Provider，不能让整个 Router 失效——否则划词连词典都查不了。
+        match secrets.get_secret(&SecretRef::provider(&record.id)) {
+            Ok(api_key) => config.api_key = api_key,
+            Err(error) => {
+                tracing::warn!(
+                    provider = %record.id,
+                    error = %error,
+                    "failed to read api key; skipping provider"
+                );
+                continue;
+            }
+        }
         if configured_default.as_deref() == Some(record.id.as_str()) {
             builder = builder.with_default(&record.id);
         }

@@ -379,7 +379,8 @@ async fn translate_and_show(
     source_text: String,
     language_hint: Option<String>,
 ) -> AppResult<()> {
-    // 识别文本先行亮出，译文流式填充。
+    // 识别文本先行亮出，译文流式填充。Keychain 授权面板可能被用户
+    // 搁置（面板会一直等），不能挡弹窗——与划词管线同一策略。
     popup::show(
         app,
         PopupState::Loading {
@@ -388,29 +389,58 @@ async fn translate_and_show(
     )
     .await?;
 
-    let router = pipeline::build_router(database)?;
-    let ai_provider = router.provider_for(lingua_ai::AiTask::Translate)?;
-    let dictionary = Arc::new(lingua_dictionary::SqliteDictionaryProvider::new(
-        database.clone(),
-    ));
-    let engine = TranslationEngine::new(ai_provider)
-        .with_dictionary(Some(dictionary))
-        .with_swap_language(pipeline::swap_language(database))
-        .with_prompt_override(pipeline::prompt_override(database));
+    // 先查词典（不碰 Keychain：命中即出结果，授权面板被搁置也拖不慢词典）。
     let target_language = pipeline::target_language(database)?;
     let request = lingua_core::translation::TranslationRequest::new(
         source_text.clone(),
         target_language.clone(),
     );
-    let app_for_delta = app.clone();
-    let mut result = engine
-        .translate_stream(&request, &mut |text: String| {
-            crate::popup::set_streamed(&text);
-            if let Err(error) = app_for_delta.emit("popup://delta", text) {
-                tracing::warn!(error = %error, "failed to emit popup delta");
+    let dictionary_probe = TranslationEngine::without_provider().with_dictionary(Some(Arc::new(
+        lingua_dictionary::SqliteDictionaryProvider::new(database.clone()),
+    )));
+    let dictionary_hit = dictionary_probe.lookup_dictionary(&request).await;
+
+    // 词典未命中才组装 Router（2s 超时：keychain 面板被搁置时降级）。
+    let mut result = if let Some(hit) = dictionary_hit {
+        hit
+    } else {
+        let database_for_router = database.clone();
+        let engine = match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            tauri::async_runtime::spawn_blocking(move || {
+                pipeline::build_router(&database_for_router).and_then(|router| {
+                    router.provider_for(lingua_ai::AiTask::Translate)
+                })
+            }),
+        )
+        .await
+        {
+            Err(_) => {
+                tracing::warn!("router build timed out (keychain prompt pending?)");
+                TranslationEngine::without_provider()
             }
-        })
-        .await?;
+            Ok(Err(error)) => {
+                tracing::warn!(error = %error, "router task failed");
+                TranslationEngine::without_provider()
+            }
+            Ok(Ok(Err(error))) => {
+                tracing::warn!(error = %error, "no usable translate provider");
+                TranslationEngine::without_provider()
+            }
+            Ok(Ok(Ok(ai_provider))) => TranslationEngine::new(ai_provider),
+        }
+        .with_swap_language(pipeline::swap_language(database))
+        .with_prompt_override(pipeline::prompt_override(database));
+        let app_for_delta = app.clone();
+        engine
+            .translate_stream(&request, &mut |text: String| {
+                crate::popup::set_streamed(&text);
+                if let Err(error) = app_for_delta.emit("popup://delta", text) {
+                    tracing::warn!(error = %error, "failed to emit popup delta");
+                }
+            })
+            .await?
+    };
     result.source_text = source_text;
     if result.detected_language.is_none() {
         result.detected_language = language_hint.as_deref().map(lingua_core::Language::parse);
@@ -453,10 +483,11 @@ async fn vision_retry(app: &AppHandle) -> AppResult<()> {
         })?
     };
 
-    popup::show(app, PopupState::Loading { source_text: None }).await?;
-
+    // Router 先行（Keychain 授权可能重置 WKWebView 透明；见 translate_and_show）。
     let router = pipeline::build_router(&state.database.clone())?;
     let ai_provider = router.provider_for(lingua_ai::AiTask::Vision)?;
+
+    popup::show(app, PopupState::Loading { source_text: None }).await?;
     let vision_engine = format!("vision:{}", ai_provider.id());
     let ocr = lingua_ocr::VisionOcrProvider::new(ai_provider)
         .recognize(&capture)

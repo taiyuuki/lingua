@@ -31,7 +31,9 @@ mod prompts {
 }
 
 pub struct TranslationEngine {
-    provider: Arc<dyn AIProvider>,
+    /// AI Provider；`None` = 词典-only 模式（无可用服务时词典仍可查，
+    /// 词典未命中返回 Config 错误给出配置指引）。
+    provider: Option<Arc<dyn AIProvider>>,
     dictionary: Option<Arc<dyn DictionaryProvider>>,
     /// 同语言换向：源文本已经（几乎全部）是目标语言时，改译成该语言。
     /// `None` 或与目标语言相同 = 不换向（保持旧行为）。
@@ -69,17 +71,47 @@ impl TranslationEngine {
     /// 用 Router 选出的 Provider 构造引擎（共享所有权，多个引擎可复用）。
     pub fn new(provider: Arc<dyn AIProvider>) -> Self {
         Self {
-            provider,
+            provider: Some(provider),
             dictionary: None,
             swap_language: None,
             prompt_override: PromptOverride::default(),
         }
     }
 
+    /// 词典查询的公开入口（单词/词组命中返回结果，句子或未命中返回
+    /// `None`）。管线用它实现「先词典、后 Keychain」的两阶段：词典
+    /// 命中秒回，不被 API Key 的授权等待拖慢。
+    pub async fn lookup_dictionary(&self, request: &TranslationRequest) -> Option<TranslationResult> {
+        self.try_dictionary(request).await
+    }
+
     /// 挂载词典（单词查询优先走词典）。可传 `None` 保持纯 AI 行为。
     pub fn with_dictionary(mut self, dictionary: Option<Arc<dyn DictionaryProvider>>) -> Self {
         self.dictionary = dictionary;
         self
+    }
+
+    /// 词典-only 模式：没有可用的 AI Provider（未配置服务，或 API Key
+    /// 读取被系统授权拒绝）时仍然可以查词典；词典未命中才报
+    /// `Config` 错误，给用户明确的配置指引而不是整条管线失效。
+    pub fn without_provider() -> Self {
+        Self {
+            provider: None,
+            dictionary: None,
+            swap_language: None,
+            prompt_override: PromptOverride::default(),
+        }
+    }
+
+    /// AI 路径必需的 Provider；词典-only 模式下词典未命中时返回指引。
+    fn require_provider(&self) -> AppResult<&Arc<dyn AIProvider>> {
+        self.provider.as_ref().ok_or_else(|| {
+            AppError::Config(
+                "词典未命中，且没有可用的 AI 服务（未配置 Provider 或 API Key 读取失败）。\
+                 请在「设置 → 服务」确认配置；若系统弹出钥匙串授权，请选择允许。"
+                    .to_string(),
+            )
+        })
     }
 
     /// 配置自定义 system prompt（`None` = 用内置模板）。
@@ -132,13 +164,14 @@ impl TranslationEngine {
 
         let (system, user) = self.render_prompt(request);
         let chat_request = ChatRequest::simple(system, user);
-        let response = self.provider.chat(&chat_request).await?;
+        let provider = self.require_provider()?;
+        let response = provider.chat(&chat_request).await?;
         Ok(parse_ai_translation(
             request,
             response.content,
             response
                 .model
-                .or_else(|| Some(self.provider.id().to_string())),
+                .or_else(|| self.provider.as_ref().map(|p| p.id().to_string())),
         ))
     }
 
@@ -163,9 +196,9 @@ impl TranslationEngine {
             .clone()
             .unwrap_or_else(|| prompts::STREAM_SYSTEM.to_string());
         let chat_request = ChatRequest::simple(system, self.user_prompt(request));
+        let provider = self.require_provider()?;
         let mut accumulated = String::new();
-        let response = self
-            .provider
+        let response = provider
             .chat_stream(&chat_request, &mut |delta: String| {
                 // Provider 契约：回调参数是到目前为止的完整文本。
                 accumulated = delta.clone();
@@ -186,7 +219,7 @@ impl TranslationEngine {
             dictionaries: Vec::new(),
             model: response
                 .model
-                .or_else(|| Some(self.provider.id().to_string())),
+                .or_else(|| self.provider.as_ref().map(|p| p.id().to_string())),
         })
     }
 
@@ -526,6 +559,44 @@ mod tests {
         assert!(!result.dictionaries.is_empty());
         assert_eq!(result.dictionaries[0].lemma, "ephemeral");
         assert_eq!(result.detected_language, Some(Language::En));
+    }
+
+    // ---- 词典-only 模式（无可用 AI Provider）----
+
+    async fn dictionary_only_engine(entries: Vec<DictionaryEntry>) -> TranslationEngine {
+        let database = lingua_database::Database::open_in_memory().unwrap();
+        database.migrate().unwrap();
+        database
+            .import_dictionary(
+                &DictionaryMeta {
+                    id: "test-dict".into(),
+                    name: "Test".into(),
+                    source_language: Language::En,
+                    gloss_language: Language::Zh,
+                },
+                &entries,
+            )
+            .unwrap();
+        TranslationEngine::without_provider()
+            .with_dictionary(Some(Arc::new(SqliteDictionaryProvider::new(database))))
+    }
+
+    #[tokio::test]
+    async fn dictionary_only_mode_still_serves_hits() {
+        // 场景：用户拒绝钥匙串授权 / 未配置 Provider —— 词典命中必须
+        // 正常返回，不能让整条划词管线失效。
+        let engine = dictionary_only_engine(vec![dict_entry("ephemeral", "短暂的")]).await;
+        let result = engine.translate(&request("Ephemeral")).await.unwrap();
+        assert_eq!(result.translated_text, "短暂的");
+        assert!(!result.dictionaries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn dictionary_only_mode_miss_returns_config_error() {
+        // 词典未命中时给明确的配置指引（Config），而不是 panic 或静默。
+        let engine = dictionary_only_engine(vec![dict_entry("ephemeral", "短暂的")]).await;
+        let error = engine.translate(&request("serendipity")).await.unwrap_err();
+        assert!(matches!(error, AppError::Config(_)), "{error}");
     }
 
     #[tokio::test]
