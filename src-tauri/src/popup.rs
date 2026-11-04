@@ -149,22 +149,36 @@ pub fn ensure_window(app: &AppHandle) -> AppResult<WebviewWindow> {
     if let Some(existing) = app.get_webview_window(crate::POPUP_LABEL) {
         return Ok(existing);
     }
-    let window = tauri::webview::WebviewWindowBuilder::new(
+    // 窗口样式按平台分叉：title_bar_style/hidden_title 是 macOS 专属
+    // API（cfg 门控，Windows 编译不过），且系统圆角方案仅 macOS 需要；
+    // Windows 保持原本的无边框弹窗。
+    let mut builder = tauri::webview::WebviewWindowBuilder::new(
         app,
         crate::POPUP_LABEL,
         tauri::WebviewUrl::App("popup.html".into()),
     )
     .title("Lingua")
     .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
-    .decorations(true) // 保留系统窗口 chrome：圆角与阴影由系统绘制
-    .title_bar_style(tauri::TitleBarStyle::Overlay) // 无标题栏视觉，内容铺满
-    .hidden_title(true) // 不显示标题文字
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(true) // 可临时调节；每次重新弹出时重置为默认尺寸
-    .visible(false) // 定位后再显示，避免闪现在默认位置
-    .build()
-    .map_err(platform_error)?;
+    .visible(false); // 定位后再显示，避免闪现在默认位置
+
+    #[cfg(target_os = "macos")]
+    {
+        // 保留系统窗口 chrome：圆角与阴影由系统绘制（主窗口同源）。
+        builder = builder
+            .decorations(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay) // 无标题栏视觉，内容铺满
+            .hidden_title(true); // 不显示标题文字
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.decorations(false);
+    }
+
+    let window = builder.build().map_err(platform_error)?;
 
     #[cfg(target_os = "macos")]
     hide_window_buttons(app, &window);
