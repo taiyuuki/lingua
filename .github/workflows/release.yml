@@ -46,6 +46,32 @@ jobs:
       - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
+      # macOS：从 secrets 导入签名证书（与本机 tauri.conf.json 的
+      # signingIdentity 同一枚 Apple Development 证书）。证书签名让 TCC
+      # （辅助功能等）授权跨版本保留；ad-hoc 每次构建哈希都变，授权失效。
+      - name: 导入 macOS 签名证书
+        if: matrix.platform == 'macos-latest'
+        env:
+          MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_SIGNING_P12" ]; then
+            echo "::warning::未配置 MACOS_SIGNING_P12 secret，macOS 包将以 ad-hoc 签名（辅助功能授权随发版失效，见 docs/RELEASE.md）"
+            exit 0
+          fi
+          certificate_path=$RUNNER_TEMP/signing-certificate.p12
+          keychain_path=$RUNNER_TEMP/signing.keychain-db
+          echo -n "$MACOS_SIGNING_P12" | base64 --decode --output "$certificate_path"
+          security create-keychain -p "$MACOS_SIGNING_P12_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$MACOS_SIGNING_P12_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$MACOS_SIGNING_P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path" -T /usr/bin/codesign
+          security set-keychain-partition-list -S apple-tool:,apple: -k "$MACOS_SIGNING_P12_PASSWORD" "$keychain_path"
+          security list-keychain -d user -s "$keychain_path" login.keychain-db
+          # 证书 SHA-1：与 tauri.conf.json > bundle > macOS > signingIdentity
+          # 同一枚，续期换证时两处同步更新。
+          echo "APPLE_SIGNING_IDENTITY=BB7B7C46B129E5FF2A1690EAFCF4DA633A7D10A1" >> "$GITHUB_ENV"
+
       - name: 构建并发布
         uses: tauri-apps/tauri-action@v0
         env:
@@ -57,9 +83,10 @@ jobs:
           # env 显式列出 → 变量必被定义为空字符串 → CLI 走空密码路径。
           # 切勿设占位符（如 "none"）——那会被当作真实密码导致解密失败。
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # runner 上没有本地钥匙串证书：ad-hoc 签名（覆盖 tauri.conf.json
-          # 的 signingIdentity）。更新包完整性由 minisign 保证，不受影响。
-          APPLE_SIGNING_IDENTITY: "-"
+          # macOS 签名身份：证书导入成功时为证书哈希（上一步写入），否则
+          # 回退 ad-hoc（"-"）。注意此 env 会覆盖 tauri.conf.json 的
+          # signingIdentity；Windows 忽略该变量。更新包完整性另由 minisign 保证。
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY || '-' }}
         with:
           tagName: v__VERSION__
           releaseName: "Lingua v__VERSION__"

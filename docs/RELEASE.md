@@ -18,6 +18,15 @@
   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：**无需创建**（密钥为空密码；
     GitHub 禁止创建空 secret，工作流中该 env 会解析为空字符串，正好匹配
     空密码。切勿用占位符填充——会被当作真实密码导致签名失败）。
+  - `MACOS_SIGNING_P12`：macOS 签名证书（.p12，base64，含私钥），须与
+    `src-tauri/tauri.conf.json > bundle > macOS > signingIdentity` 指向的
+    同一枚 Apple Development 证书（两处 SHA-1 哈希需同步更新）。导出：
+    钥匙串访问 → 登录钥匙串 → 选中该证书（双击查看指纹 / 有效期确认）→
+    确认展开含私钥 → 右键导出为 .p12 并设密码，然后
+    `base64 -i 导出.p12 | pbcopy` 粘贴为 secret；
+  - `MACOS_SIGNING_P12_PASSWORD`：导出 .p12 时设置的密码。
+  - 未配置 `MACOS_SIGNING_P12` 时 CI 回退 ad-hoc 签名（工作流输出警告）；
+    缺点是 TCC 授权（辅助功能等）随每次发版失效。
 
 > ⚠️ 私钥丢失后将无法签发任何可被旧版本安装的更新包——务必备份。
 
@@ -44,8 +53,10 @@ NSIS 安装器 + sig（Windows）、`latest.json`。
 
 - 启动 3 秒后静默检查；有新版本时侧边栏「设置」出现红点。
 - 设置页「关于与更新」卡片：手动检查、下载（进度条）、安装后自动重启。
-- macOS CI 包为 ad-hoc 签名（`APPLE_SIGNING_IDENTITY: "-"`）：首次打开需
-  右键 → 打开绕过 Gatekeeper；更新包完整性由 minisign 签名保证，与代码签名无关。
+- macOS CI 包用 Apple Development 证书签名（与本地构建同一枚）：辅助功能
+  等 TCC 授权跨版本保留。该证书非 Developer ID 且包未公证，首次安装 dmg
+  仍需右键 → 打开（或系统设置「仍要打开」）绕过 Gatekeeper；应用内更新
+  路径不受影响，更新包完整性由 minisign 签名保证，与代码签名无关。
 
 ## 验证更新链路（端到端）
 
