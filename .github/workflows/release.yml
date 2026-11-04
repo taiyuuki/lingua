@@ -67,7 +67,10 @@ jobs:
           security set-keychain-settings -lut 21600 "$keychain_path"
           security unlock-keychain -p "$MACOS_SIGNING_P12_PASSWORD" "$keychain_path"
           security import "$certificate_path" -P "$MACOS_SIGNING_P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path" -T /usr/bin/codesign
-          security set-keychain-partition-list -S apple-tool:,apple: -k "$MACOS_SIGNING_P12_PASSWORD" "$keychain_path"
+          # macOS 26 起 security 移除 set-keychain-partition-list；import 已带
+          # -A（任意应用可访问私钥，实测 codesign 静默签名无需此步），本行仅对
+          # 旧镜像生效，失败忽略（新镜像上报 unknown command）。
+          security set-keychain-partition-list -S apple-tool:,apple: -k "$MACOS_SIGNING_P12_PASSWORD" "$keychain_path" 2>/dev/null || true
           security list-keychain -d user -s "$keychain_path" login.keychain-db
           # 证书 SHA-1：与 tauri.conf.json > bundle > macOS > signingIdentity
           # 同一枚，续期换证时两处同步更新。
