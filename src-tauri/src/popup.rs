@@ -8,10 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
 
 /// 与前端 popup 样式约定一致的窗口尺寸（逻辑像素）。
-/// 560/480 是卡片视觉尺寸；+24 给 .popup-root 四周 12px 的
-/// CSS 投影留边（系统阴影已关，避免圆角外的白色尖角）。
-pub const POPUP_WIDTH: f64 = 584.0;
-pub const POPUP_HEIGHT: f64 = 504.0;
+pub const POPUP_WIDTH: f64 = 560.0;
+pub const POPUP_HEIGHT: f64 = 480.0;
 /// Popup 事件通道（前端 `listen("popup://state")`）。
 pub const POPUP_EVENT: &str = "popup://state";
 
@@ -103,29 +101,75 @@ fn arm_focus_watcher(window: tauri::Window) {
     });
 }
 
+/// 隐藏窗口的交通灯按钮（关闭/最小化/缩放）：popup 用 Overlay 标题栏
+/// 样式（无标题栏视觉，保留系统圆角与阴影），按钮悬浮在内容上需手动
+/// 藏掉。AppKit 调用必须主线程执行，经 run_on_main_thread 派发。
+#[cfg(target_os = "macos")]
+fn hide_window_buttons(app: &AppHandle, window: &WebviewWindow) {
+    let window = window.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        hide_window_buttons_on_main(&window);
+    }) {
+        tracing::warn!(error = %error, "failed to dispatch window button hiding");
+    }
+}
+
+/// 只能在主线程调用（见 [`hide_window_buttons`]）。
+#[cfg(target_os = "macos")]
+// SAFETY：指针来自 tauri 的 ns_window()（闭包捕获的 WebviewWindow 保活），
+/// 且仅在主线程执行 AppKit 调用。
+#[allow(unsafe_code)]
+fn hide_window_buttons_on_main(window: &WebviewWindow) {
+    use objc2_app_kit::{NSWindow, NSWindowButton};
+    unsafe {
+        let Ok(ptr) = window.ns_window() else {
+            return;
+        };
+        let ns_window = &*ptr.cast::<NSWindow>();
+        for button in [
+            NSWindowButton::CloseButton,
+            NSWindowButton::MiniaturizeButton,
+            NSWindowButton::ZoomButton,
+        ] {
+            if let Some(button) = ns_window.standardWindowButton(button) {
+                button.setHidden(true);
+            }
+        }
+    }
+}
+
 /// 获取或创建（隐藏的）popup 窗口。
+///
+/// 窗口样式走「系统标准窗口 + Overlay 标题栏」路线（与主窗口同源的
+/// 系统圆角/阴影/合成），不再使用 transparent 自绘圆角——那条路依赖
+/// WKWebView 私有 API（drawsBackground/underPageBackgroundColor），渲染
+/// 层重建（窗口 show/hide、Security Agent 授权面板）会反复重置，导致
+/// 圆角外出现实色边框。
 pub fn ensure_window(app: &AppHandle) -> AppResult<WebviewWindow> {
     if let Some(existing) = app.get_webview_window(crate::POPUP_LABEL) {
         return Ok(existing);
     }
-    tauri::webview::WebviewWindowBuilder::new(
+    let window = tauri::webview::WebviewWindowBuilder::new(
         app,
         crate::POPUP_LABEL,
         tauri::WebviewUrl::App("popup.html".into()),
     )
     .title("Lingua")
     .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
-    .decorations(false)
-    .transparent(true) // 圆角：页面根节点 border-radius 裁剪（需 macOSPrivateApi）
-    // 系统阴影按矩形窗口采样，会在圆角外的透明区留下白色尖角
-    // （暗色主题下可见）；投影改由 .popup-root 的 box-shadow 自绘。
-    .shadow(false)
+    .decorations(true) // 保留系统窗口 chrome：圆角与阴影由系统绘制
+    .title_bar_style(tauri::TitleBarStyle::Overlay) // 无标题栏视觉，内容铺满
+    .hidden_title(true) // 不显示标题文字
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(true) // 可临时调节；每次重新弹出时重置为默认尺寸
     .visible(false) // 定位后再显示，避免闪现在默认位置
     .build()
-    .map_err(platform_error)
+    .map_err(platform_error)?;
+
+    #[cfg(target_os = "macos")]
+    hide_window_buttons(app, &window);
+
+    Ok(window)
 }
 
 /// 光标所在的显示器；取不到光标或命中失败时回退主显示器。

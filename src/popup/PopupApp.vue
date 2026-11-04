@@ -300,7 +300,7 @@ onUnmounted(() => {
   unlistenDelta?.();
 });
 
-// 无边框窗口拖动：工具栏按下（按钮除外）即开始拖拽。
+// 无边框窗口拖动：顶部拖拽条 + 工具栏按下（按钮除外）即开始拖拽。
 function onToolbarMouseDown(event: MouseEvent): void {
   if (event.button !== 0) {
     return;
@@ -315,6 +315,12 @@ function onToolbarMouseDown(event: MouseEvent): void {
 
 <template>
   <div class="popup-root">
+    <!-- 顶部拖拽条：通栏可拖，grab 游标提示 -->
+    <div
+      class="popup-drag-zone"
+      @mousedown="onToolbarMouseDown"
+    />
+
     <!-- 工具栏：置顶 | 收藏 / 复制原文 -->
     <div
       class="popup-toolbar"

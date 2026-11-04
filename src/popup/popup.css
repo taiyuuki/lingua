@@ -1,7 +1,2 @@
-/* Popup 窗口页面本身透明：圆角由 .popup-root 提供（窗口 transparent）。
-   注意：必须覆盖 main.css 里 body 的不透明背景。 */
-html,
-body,
-#popup {
-  background: transparent;
-}
+/* Popup 使用系统标准窗口（Overlay 标题栏）：窗口不透明，
+   页面背景直接用 main.css 的 --color-bg 令牌，无需透明覆盖。 */

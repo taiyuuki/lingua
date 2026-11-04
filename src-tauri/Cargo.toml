@@ -42,5 +42,10 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+# macOS popup 窗口按钮隐藏（Overlay 标题栏的交通灯）。
+# 版本与 wry 依赖树对齐，避免重复编译。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", features = ["NSButton", "NSWindow"] }
+
 [lints]
 workspace = true
