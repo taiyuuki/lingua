@@ -45,13 +45,18 @@
   box-sizing: border-box;
 }
 
-html,
-body {
+html {
   margin: 0;
   height: 100%;
 }
 
-body {
+/* 用 `html body`（0-0-2）而非 `body`（0-0-1）：词典样式表经词条富文本的
+   <link> 全局注入且晚于应用样式加载，其按独立网页设计的 body{} 白底/灰字
+   规则会覆盖同级的 body 规则——提高优先级后元素选择器再晚也压不过。
+   值与原 body 规则完全一致，仅优先级变化。 */
+html body {
+  margin: 0;
+  height: 100%;
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.6;
@@ -144,6 +149,17 @@ body {
   min-width: 0;
   overflow-y: auto;
   padding: 24px 28px 40px;
+}
+
+/* 同上：词典样式的 main{} 白底/灰字规则会命中这个 <main> 元素
+   （.app-content 未声明 background/color，元素选择器乘虚而入）。
+   main.app-content（0-1-1）> main（0-0-1），且带类名限定——词典
+   富文本内部嵌套的 <main>（无该类）不受影响。注意不能用
+   body > main：<main> 实际嵌套在 app-shell 内，不是 body 直接子级。 */
+main.app-content {
+  color: inherit;
+  background: transparent;
+  clear: none;
 }
 
 /* ---------- 视图通用 ---------- */
