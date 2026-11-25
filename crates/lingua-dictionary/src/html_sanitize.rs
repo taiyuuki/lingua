@@ -33,10 +33,46 @@ impl DefinitionSanitizer {
         );
 
         let tags: HashSet<&str> = [
-            "div", "p", "span", "b", "i", "u", "em", "strong", "small", "big", "sup", "sub",
-            "br", "hr", "ul", "ol", "li", "dl", "dt", "dd", "table", "thead", "tbody",
-            "tfoot", "tr", "td", "th", "caption", "h1", "h2", "h3", "h4", "h5", "h6",
-            "blockquote", "abbr", "font", "a", "img", "link",
+            "div",
+            "p",
+            "span",
+            "b",
+            "i",
+            "u",
+            "em",
+            "strong",
+            "small",
+            "big",
+            "sup",
+            "sub",
+            "br",
+            "hr",
+            "ul",
+            "ol",
+            "li",
+            "dl",
+            "dt",
+            "dd",
+            "table",
+            "thead",
+            "tbody",
+            "tfoot",
+            "tr",
+            "td",
+            "th",
+            "caption",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "blockquote",
+            "abbr",
+            "font",
+            "a",
+            "img",
+            "link",
         ]
         .into_iter()
         .collect();
@@ -48,14 +84,8 @@ impl DefinitionSanitizer {
             "img",
             ["src", "alt", "width", "height"].into_iter().collect(),
         );
-        tag_attributes.insert(
-            "link",
-            ["href", "rel", "type"].into_iter().collect(),
-        );
-        tag_attributes.insert(
-            "font",
-            ["color", "face", "size"].into_iter().collect(),
-        );
+        tag_attributes.insert("link", ["href", "rel", "type"].into_iter().collect());
+        tag_attributes.insert("font", ["color", "face", "size"].into_iter().collect());
         tag_attributes.insert(
             "table",
             ["border", "cellspacing", "cellpadding", "width", "align"]
@@ -160,9 +190,9 @@ fn css_property_allowed(property: &str) -> bool {
     ];
     const PREFIXES: [&str; 6] = ["border", "margin", "padding", "font", "text", "list-style"];
     EXACT.contains(&property)
-        || PREFIXES.iter().any(|prefix| {
-            property == *prefix || property.starts_with(&format!("{prefix}-"))
-        })
+        || PREFIXES
+            .iter()
+            .any(|prefix| property == *prefix || property.starts_with(&format!("{prefix}-")))
 }
 
 fn sanitize_style(value: &str) -> String {
@@ -177,8 +207,7 @@ fn sanitize_style(value: &str) -> String {
             continue;
         }
         let lower = val.to_ascii_lowercase();
-        if lower.contains("url(") || lower.contains("expression") || lower.contains("javascript")
-        {
+        if lower.contains("url(") || lower.contains("expression") || lower.contains("javascript") {
             continue;
         }
         kept.push(format!("{property}: {val}"));
@@ -217,7 +246,10 @@ fn rewrite_resource<'v>(value: &'v str, base: &str) -> Option<Cow<'v, str>> {
         return Some(Cow::Borrowed(value));
     }
     let normalized = normalize_resource_path(value)?;
-    Some(Cow::Owned(format!("{base}{}", percent_encode_path(&normalized))))
+    Some(Cow::Owned(format!(
+        "{base}{}",
+        percent_encode_path(&normalized)
+    )))
 }
 
 /// URL 路径段百分号编码（RFC 3986 unreserved + `/` 之外全部转义）。
@@ -301,7 +333,10 @@ mod tests {
             "<img src=\"/img/a.png\"><link href=\"\\css\\oald.css\" rel=\"stylesheet\">",
             "d1",
         );
-        assert!(out.contains("src=\"mdx-res://localhost/d1/img/a.png\""), "{out}");
+        assert!(
+            out.contains("src=\"mdx-res://localhost/d1/img/a.png\""),
+            "{out}"
+        );
         assert!(
             out.contains("href=\"mdx-res://localhost/d1/css/oald.css\""),
             "{out}"
@@ -339,10 +374,7 @@ mod tests {
     #[test]
     fn mdict_control_wrapped_resource_names_are_unwrapped() {
         // MDict 行内资源：\x1E 文件名 \x1F（插图版牛津的图片全是这种形式）。
-        let out = sanitize_definition_html(
-            "<img src=\"\u{1e}9DB12AFC.bmp\u{1f}\">",
-            "d1",
-        );
+        let out = sanitize_definition_html("<img src=\"\u{1e}9DB12AFC.bmp\u{1f}\">", "d1");
         assert!(out.contains("mdx-res://localhost/d1/9DB12AFC.bmp"), "{out}");
         assert!(!out.contains("%1E"), "{out}");
     }

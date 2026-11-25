@@ -72,7 +72,10 @@ impl MdxEntry {
     /// `@@@LINK=` 重定向条目：MDict 里指向另一个词头的链接，
     /// 纯文本导入下没有意义，跳过。
     pub fn is_redirect(&self) -> bool {
-        self.text.trim_start().to_lowercase().starts_with("@@@link=")
+        self.text
+            .trim_start()
+            .to_lowercase()
+            .starts_with("@@@link=")
     }
 
     /// 转换为统一词典模型：纯文本 + 净化后的富文本 HTML 各存一份。
@@ -334,7 +337,12 @@ pub(crate) fn parse_header(buf: &[u8]) -> AppResult<(Header, usize)> {
         }
         i += 2;
     }
-    let attr = |name: &str| attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+    let attr = |name: &str| {
+        attrs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
+    };
 
     let engine_version = attr("generatedbyengineversion")
         .or_else(|| attr("requiredformatversion"))
@@ -475,8 +483,7 @@ pub(crate) fn parse_key_section(
     } else {
         key_index_raw
     };
-    let key_index =
-        decompress_block(key_index_raw, header.v2, key_index_decomp_len, "key 信息区")?;
+    let key_index = decompress_block(key_index_raw, header.v2, key_index_decomp_len, "key 信息区")?;
     let mut info = Reader::new(&key_index);
     let mut blocks_meta = Vec::with_capacity(num_key_blocks.min(65536));
     for _ in 0..num_key_blocks {
@@ -563,8 +570,7 @@ pub fn convert_entries_parallel(
             .chunks(chunk_size.max(1))
             .map(|chunk| {
                 scope.spawn(move || {
-                    let sanitizer =
-                        crate::html_sanitize::DefinitionSanitizer::new(source);
+                    let sanitizer = crate::html_sanitize::DefinitionSanitizer::new(source);
                     chunk
                         .iter()
                         .map(|entry| {
@@ -766,8 +772,12 @@ impl Iterator for MdxEntries<'_> {
                 .file
                 .file
                 .get(block.file_offset..block.file_offset + block.comp_len)?;
-            let decompressed =
-                match decompress_block(raw, self.file.v2, block.decomp_len, "record 块") {
+            let decompressed = match decompress_block(
+                raw,
+                self.file.v2,
+                block.decomp_len,
+                "record 块",
+            ) {
                 Ok(data) => data,
                 Err(error) => {
                     tracing::warn!(block = block_index, %error, "mdx record block failed; stopping iteration");
@@ -784,7 +794,11 @@ impl Iterator for MdxEntries<'_> {
         }
 
         // 释义长度 = 到下一组偏移（同块内）或本块解压数据末尾。
-        let next_offset = self.file.groups.get(self.group_index).map(|g| g.record_offset);
+        let next_offset = self
+            .file
+            .groups
+            .get(self.group_index)
+            .map(|g| g.record_offset);
         let end = match next_offset {
             Some(next)
                 if next >= block.stream_offset
@@ -808,9 +822,32 @@ impl Iterator for MdxEntries<'_> {
 
 /// 块级标签：出现即换行（含 `<br>`）。
 const BLOCK_TAGS: [&str; 26] = [
-    "br", "p", "div", "li", "ul", "ol", "dl", "dt", "dd", "tr", "table", "tbody", "thead",
-    "tfoot", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "pre", "section",
-    "article", "header",
+    "br",
+    "p",
+    "div",
+    "li",
+    "ul",
+    "ol",
+    "dl",
+    "dt",
+    "dd",
+    "tr",
+    "table",
+    "tbody",
+    "thead",
+    "tfoot",
+    "blockquote",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "pre",
+    "section",
+    "article",
+    "header",
 ];
 
 /// 把 MDX 释义 HTML 转成带换行的纯文本：块级标签换行、`<td>/<th>`
@@ -822,7 +859,9 @@ pub fn html_to_plain_text(html: &str) -> String {
     while i < bytes.len() {
         match bytes[i] {
             b'<' => {
-                let Some(tag_end) = html[i..].find('>') else { break };
+                let Some(tag_end) = html[i..].find('>') else {
+                    break;
+                };
                 let tag = &html[i + 1..i + tag_end];
                 let name: String = tag
                     .trim_start_matches('/')
@@ -1014,8 +1053,8 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
-    use flate2::write::ZlibEncoder;
     use flate2::Compression;
+    use flate2::write::ZlibEncoder;
     use std::io::Write as _;
 
     fn zlib(data: &[u8]) -> Vec<u8> {
@@ -1130,10 +1169,7 @@ mod tests {
         record_info.extend_from_slice(&u32be(stream.len() as u64));
 
         let mut key_block_data = Vec::new();
-        for (path, offset) in [
-            ("\\css\\a.css", 0u64),
-            ("/img/b.png", css.len() as u64),
-        ] {
+        for (path, offset) in [("\\css\\a.css", 0u64), ("/img/b.png", css.len() as u64)] {
             key_block_data.extend_from_slice(&u32be(offset));
             key_block_data.extend_from_slice(&utf8_nul_text(path));
         }
@@ -1210,7 +1246,8 @@ mod tests {
         let dict = MdxFile::parse(minimal_mdx()).unwrap();
         let entries: Vec<MdxEntry> = dict.entries().collect();
         let sanitizer = crate::html_sanitize::DefinitionSanitizer::new("test");
-        let entry = entries[1].to_dictionary_entry(&Language::En, &Language::Zh, "test", &sanitizer);
+        let entry =
+            entries[1].to_dictionary_entry(&Language::En, &Language::Zh, "test", &sanitizer);
         assert_eq!(entry.lemma, "world");
         assert_eq!(entry.inflections, vec!["world2"]);
         assert_eq!(entry.definitions.len(), 1);
@@ -1234,7 +1271,10 @@ mod tests {
         let header_len = u32::from_be_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let header_text = decode_text(&bytes[4..4 + header_len], true, UTF_16LE);
         let patched = header_text.replace("Encrypted=\"No\"", "Encrypted=\"1 \"");
-        assert_ne!(patched, header_text, "test fixture must contain Encrypted=\"No\"");
+        assert_ne!(
+            patched, header_text,
+            "test fixture must contain Encrypted=\"No\""
+        );
         let mut patched_bytes = Vec::new();
         for unit in patched.encode_utf16() {
             patched_bytes.extend_from_slice(&unit.to_le_bytes());
@@ -1255,8 +1295,7 @@ mod tests {
         let mut previous = 0x36u8;
         for (index, byte) in data.iter_mut().enumerate() {
             let plain = *byte;
-            let cipher =
-                (plain ^ previous ^ (index as u8) ^ key[index % key.len()]).rotate_left(4);
+            let cipher = (plain ^ previous ^ (index as u8) ^ key[index % key.len()]).rotate_left(4);
             *byte = cipher;
             previous = cipher;
         }
@@ -1382,7 +1421,9 @@ mod tests {
 
         // 大小写不敏感命中，别名保留在词形变化里，富文本 HTML 随行；
         // source 填词典名称（展示用）。
-        let hits = database.lookup_entries("WORLD", Some(Language::En)).unwrap();
+        let hits = database
+            .lookup_entries("WORLD", Some(Language::En))
+            .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].lemma, "world");
         assert_eq!(hits[0].source, "Test MDX");

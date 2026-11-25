@@ -1,31 +1,40 @@
 //! OCR 截图翻译：快照式选区 overlay + 截图→OCR→翻译 pipeline。
 //!
-//! 快照式设计（截图类工具的标准做法）：`start_ocr_capture` 先截取
-//! 主显示器整屏，overlay 显示这张「冻结截图」，用户在图上框选。
+//! 快照式设计（截图类工具的标准做法）：`start_capture` 先把**每一块显示器**
+//! 截成冻结截图，每块屏铺一个 overlay 窗口显示对应的快照，用户在图上框选。
 //! 好处：
 //!
 //! * 不依赖窗口透明 / macOSPrivateApi；
 //! * 所见即所选，遮罩永远不会被截进图；
-//! * 选区坐标（CSS 像素 = 逻辑点）× 会话里存的缩放比 = 像素坐标，
-//!   直接在整屏截图上裁剪后送 OCR。
+//! * 选区用「虚拟桌面逻辑坐标」在所有 overlay 间同步，拖拽可以从一块屏
+//!   起笔、拖到另一块屏松手（见 `lingua_platform::DesktopCapture`）；
+//! * 每块屏的选区坐标（CSS 像素 = 逻辑点）× 该屏截图的缩放比 = 像素坐标，
+//!   直接在快照上裁剪后送 OCR。
 //!
 //! 整屏截图只存在内存会话里，选区裁剪即读即用，不落盘。
 
 use crate::pipeline;
 use crate::popup;
-use crate::{platform_error, state::AppState, state::OcrSession, state::PopupState};
+use crate::{platform_error, state::AppState, state::PopupState};
 use lingua_core::{AppError, AppResult, OcrResult, Rect};
 use lingua_database::Database;
 use lingua_ocr::{HttpOcrProvider, OcrProvider, TesseractOcrProvider};
+use lingua_platform::{DesktopCapture, MonitorCapture, MonitorGeometry};
 use lingua_translation::TranslationEngine;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
-/// OCR 选区窗口的固定 label（capabilities 里需放行）。
-pub const OVERLAY_LABEL: &str = "ocr-selection";
+/// OCR 选区窗口的 label 前缀：每块显示器一个窗口，`ocr-selection-{显示器下标}`
+/// （capabilities 以 `ocr-selection-*` 放行）。
+pub const OVERLAY_LABEL_PREFIX: &str = "ocr-selection-";
 /// 会话更新通知：overlay 收到后重新拉取背景截图。
 /// 窗口是复用的（Vue 只挂载一次），所以每次 start 都要推一次。
 pub const BACKGROUND_UPDATED_EVENT: &str = "ocr://background-updated";
+
+/// 截图会话进行中标记：快捷键连按时忽略重复触发，免得两次截图互相把对方的
+/// overlay 截进画面。
+static CAPTURING: AtomicBool = AtomicBool::new(false);
 
 /// settings 表键名。
 pub const SETTINGS_OCR_PROVIDER: &str = "ocr.provider";
@@ -35,14 +44,23 @@ pub const OCR_PROVIDER_TESSERACT: &str = "tesseract";
 pub const OCR_PROVIDER_HTTP: &str = "http";
 pub const DEFAULT_OCR_TESSERACT_PATH: &str = "tesseract";
 
-/// 获取或创建选区窗口（不透明，内容是整屏截图）。
-pub fn ensure_overlay(app: &AppHandle) -> AppResult<WebviewWindow> {
-    if let Some(existing) = app.get_webview_window(OVERLAY_LABEL) {
+fn overlay_label(index: usize) -> String {
+    format!("{OVERLAY_LABEL_PREFIX}{index}")
+}
+
+/// overlay 窗口 label → 显示器下标；非 overlay 窗口为 `None`。
+fn overlay_index(label: &str) -> Option<usize> {
+    label.strip_prefix(OVERLAY_LABEL_PREFIX)?.parse().ok()
+}
+
+/// 获取或创建第 `index` 块显示器的选区窗口（不透明，内容是该屏截图）。
+fn ensure_overlay(app: &AppHandle, index: usize) -> AppResult<WebviewWindow> {
+    if let Some(existing) = app.get_webview_window(&overlay_label(index)) {
         return Ok(existing);
     }
     tauri::webview::WebviewWindowBuilder::new(
         app,
-        OVERLAY_LABEL,
+        overlay_label(index),
         tauri::WebviewUrl::App("ocr.html".into()),
     )
     .title("Lingua OCR")
@@ -56,10 +74,14 @@ pub fn ensure_overlay(app: &AppHandle) -> AppResult<WebviewWindow> {
     .map_err(platform_error)
 }
 
-/// 把 overlay 铺满指定显示器并显示、聚焦。
+/// 把第 `index` 块屏的 overlay 铺满对应显示器（保持当前的显示 / 隐藏状态）。
 /// 与快照截的是同一块屏幕，选区坐标（overlay CSS）与截图天然对齐。
-pub async fn show_overlay(app: &AppHandle, monitor: &tauri::Monitor) -> AppResult<()> {
-    let window = ensure_overlay(app)?;
+fn place_overlay(
+    app: &AppHandle,
+    index: usize,
+    monitor: &tauri::Monitor,
+) -> AppResult<WebviewWindow> {
+    let window = ensure_overlay(app, index)?;
     let position = monitor.position();
     let size = monitor.size();
     window
@@ -68,16 +90,45 @@ pub async fn show_overlay(app: &AppHandle, monitor: &tauri::Monitor) -> AppResul
     window
         .set_size(PhysicalSize::new(size.width, size.height))
         .map_err(platform_error)?;
-    window.show().map_err(platform_error)?;
-    window.set_focus().map_err(platform_error)?;
-    Ok(())
+    Ok(window)
 }
 
-pub fn hide_overlay(app: &AppHandle) -> AppResult<()> {
-    if let Some(window) = app.get_webview_window(OVERLAY_LABEL) {
-        window.hide().map_err(platform_error)?;
+/// 隐藏全部 overlay；返回隐藏前是否有可见的（调用方据此决定截图前要不要
+/// 等一拍，让系统把窗口从屏幕上撤下）。
+pub fn hide_overlays(app: &AppHandle) -> AppResult<bool> {
+    let mut was_visible = false;
+    for (label, window) in app.webview_windows() {
+        if !label.starts_with(OVERLAY_LABEL_PREFIX) {
+            continue;
+        }
+        if window.is_visible().map_err(platform_error)? {
+            was_visible = true;
+            window.hide().map_err(platform_error)?;
+        }
     }
-    Ok(())
+    Ok(was_visible)
+}
+
+/// 显示器几何（物理像素矩形 + 缩放比），截屏与逻辑坐标换算的输入。
+fn geometry_of(monitor: &tauri::Monitor) -> MonitorGeometry {
+    let position = monitor.position();
+    let size = monitor.size();
+    MonitorGeometry {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+        scale_factor: monitor.scale_factor(),
+    }
+}
+
+/// 光标所在显示器在本次布局里的下标：焦点 overlay 跟着光标走
+/// （Esc 在那块屏生效）；对不上时退回第一块。
+fn cursor_monitor_index(app: &AppHandle, geometries: &[MonitorGeometry]) -> usize {
+    crate::popup::cursor_monitor(app)
+        .map(|monitor| geometry_of(&monitor))
+        .and_then(|cursor| geometries.iter().position(|geometry| *geometry == cursor))
+        .unwrap_or(0)
 }
 
 /// 从设置构建 OCR Provider。
@@ -212,76 +263,165 @@ async fn recognize_with_vision_fallback(
     }
 }
 
-/// 启动截图会话：截光标所在显示器整屏 → 存入内存会话 →
-/// 在同一块屏幕上显示选区 overlay（多显示器下跟着光标走，
-/// 不再固定主显示器）。
+/// 截图进行中标记的守卫：`start_capture` 以任何方式退出（含 panic）都复位。
+struct CaptureGuard;
+
+impl Drop for CaptureGuard {
+    fn drop(&mut self) {
+        CAPTURING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// 启动截图会话：把**所有**显示器截成快照存入内存会话，并在每块屏上显示
+/// 对应的选区 overlay —— 框选可以从一块屏起笔、拖到另一块屏松手；
+/// 焦点给光标所在那块屏的 overlay。
 pub async fn start_capture(app: &AppHandle) -> AppResult<()> {
+    if CAPTURING.swap(true, Ordering::SeqCst) {
+        tracing::debug!("ocr capture already in progress; ignoring retrigger");
+        return Ok(());
+    }
+    let _guard = CaptureGuard;
+    capture_desktop(app).await
+}
+
+async fn capture_desktop(app: &AppHandle) -> AppResult<()> {
     let state = app.state::<AppState>();
 
-    let monitor = crate::popup::cursor_monitor(app)
-        .ok_or_else(|| AppError::Platform("no monitor found".to_string()))?;
-    let position = monitor.position();
-    let size = monitor.size();
-    let monitor_rect = Rect {
-        x: f64::from(position.x),
-        y: f64::from(position.y),
-        width: f64::from(size.width),
-        height: f64::from(size.height),
-    };
+    // 0. overlay 还在屏幕上（快捷键连按）→ 先全部撤下并等一拍，
+    //    免得把上一帧的冻结画面截进新快照。
+    if hide_overlays(app)? {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
 
-    let image = tauri::async_runtime::spawn_blocking(move || {
-        lingua_platform::capture_region(&monitor_rect)
-    })
-    .await
-    .map_err(|error| AppError::Internal(error.to_string()))??;
-    tracing::debug!(
-        width = image.width,
-        height = image.height,
-        "ocr snapshot captured"
-    );
+    // 1. 枚举显示器；一块都取不到时退回主显示器。
+    let mut monitors = app.available_monitors().map_err(platform_error)?;
+    if monitors.is_empty() {
+        monitors = app
+            .primary_monitor()
+            .map_err(platform_error)?
+            .into_iter()
+            .collect();
+    }
+    if monitors.is_empty() {
+        return Err(AppError::Platform("no monitor found".to_string()));
+    }
+    let geometries: Vec<MonitorGeometry> = monitors.iter().map(geometry_of).collect();
+    let focus_index = cursor_monitor_index(app, &geometries);
 
-    let data_url = format!(
-        "data:image/png;base64,{}",
-        lingua_core::base64_encode(&image.png)
-    );
+    // 2. overlay 窗口就位（保持隐藏）：窗口几何 = 目标显示器。
+    for (index, monitor) in monitors.iter().enumerate() {
+        place_overlay(app, index, monitor)?;
+    }
+
+    // 3. 逐屏截图：每块屏一个阻塞任务，并行。
+    let mut pending: Vec<_> = geometries
+        .iter()
+        .map(|geometry| {
+            let geometry = *geometry;
+            tauri::async_runtime::spawn_blocking(move || {
+                lingua_platform::capture_monitor(&geometry)
+            })
+        })
+        .collect();
+    let mut captures = Vec::with_capacity(pending.len());
+    for geometry in &geometries {
+        let image = pending
+            .remove(0)
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))??;
+        tracing::debug!(
+            width = image.width,
+            height = image.height,
+            "ocr snapshot captured"
+        );
+        captures.push(MonitorCapture {
+            image,
+            rect: geometry.logical_rect(),
+        });
+    }
+
+    let backgrounds: Vec<String> = captures
+        .iter()
+        .map(|capture| {
+            format!(
+                "data:image/png;base64,{}",
+                lingua_core::base64_encode(&capture.image.png)
+            )
+        })
+        .collect();
 
     {
         let mut guard = state
             .ocr
             .lock()
             .map_err(|_| AppError::Internal("ocr session lock poisoned".into()))?;
-        *guard = Some(OcrSession {
-            image,
-            background_data_url: data_url,
-            logical_width: monitor_rect.width,
-            logical_height: monitor_rect.height,
+        *guard = Some(crate::state::OcrSession {
+            desktop: DesktopCapture::new(captures)?,
+            backgrounds,
         });
     }
 
-    // 通知 overlay 拉取新背景。窗口隐藏时 webview 仍然存活、能收事件；
-    // 放在 show 之前，尽量让新图在窗口可见前就位。
-    app.emit_to(OVERLAY_LABEL, BACKGROUND_UPDATED_EVENT, ())
+    // 4. 通知各 overlay 拉取新背景，再逐块显示。窗口隐藏时 webview 仍然存活、
+    //    能收事件；放在 show 之前，尽量让新图在窗口可见前就位。
+    let count = monitors.len();
+    for index in 0..count {
+        app.emit_to(overlay_label(index), BACKGROUND_UPDATED_EVENT, ())
+            .map_err(platform_error)?;
+    }
+    for index in 0..count {
+        ensure_overlay(app, index)?.show().map_err(platform_error)?;
+    }
+    ensure_overlay(app, focus_index)?
+        .set_focus()
         .map_err(platform_error)?;
-
-    show_overlay(app, &monitor).await
+    tracing::debug!(monitors = count, focus = focus_index, "ocr overlays shown");
+    Ok(())
 }
 
-/// 当前会话的整屏截图（data URL），overlay 用它做选区背景。
-pub fn current_background(app: &AppHandle) -> AppResult<Option<String>> {
-    let state = app.state::<AppState>();
+/// overlay 窗口的归属：本窗口铺在哪块显示器上（虚拟桌面逻辑坐标矩形）
+/// + 该屏的冻结截图。前端据此把本地 CSS 坐标换算成全局坐标。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrSurface {
+    pub monitor_index: usize,
+    /// 该显示器在虚拟桌面逻辑坐标系里的矩形；overlay 的 CSS 像素相对它定位。
+    pub rect: Rect,
+    /// 该显示器的冻结截图（data URL）。
+    pub background: String,
+}
+
+/// 当前会话里某个 overlay 窗口对应的显示器快照；没有活动会话
+/// （或该窗口对应的显示器这次没截到）为 `None`。
+pub fn current_surface(window: &WebviewWindow) -> AppResult<Option<OcrSurface>> {
+    let Some(index) = overlay_index(window.label()) else {
+        return Ok(None);
+    };
+    let state = window.state::<AppState>();
     let guard = state
         .ocr
         .lock()
         .map_err(|_| AppError::Internal("ocr session lock poisoned".into()))?;
-    Ok(guard
-        .as_ref()
-        .map(|session| session.background_data_url.clone()))
+    Ok(guard.as_ref().and_then(|session| {
+        let monitor = session.desktop.monitors.get(index)?;
+        let background = session.backgrounds.get(index)?;
+        Some(OcrSurface {
+            monitor_index: index,
+            rect: monitor.rect,
+            background: background.clone(),
+        })
+    }))
 }
 
 /// 完整 OCR 翻译流程；失败以 popup 错误态呈现。
-/// `viewport` 是 overlay 的 CSS 视口尺寸（HiDPI 自校准基准）。
-pub async fn run_ocr_pipeline(app: AppHandle, rect: Rect, viewport: (f64, f64)) {
-    if let Err(error) = run(&app, rect, viewport).await {
+/// `rect` 是发起框选的那个 overlay 的 CSS 像素选区（跨屏拖拽时可以越出该屏），
+/// `viewport` 是该 overlay 的 CSS 视口尺寸（HiDPI 自校准基准）。
+pub async fn run_ocr_pipeline(
+    app: AppHandle,
+    window: WebviewWindow,
+    rect: Rect,
+    viewport: (f64, f64),
+) {
+    if let Err(error) = run(&app, &window, rect, viewport).await {
         tracing::warn!(error = %error, "ocr pipeline failed");
         let popup_state = PopupState::Error {
             kind: error.kind().to_string(),
@@ -293,15 +433,22 @@ pub async fn run_ocr_pipeline(app: AppHandle, rect: Rect, viewport: (f64, f64)) 
     }
 }
 
-async fn run(app: &AppHandle, rect: Rect, viewport: (f64, f64)) -> AppResult<()> {
+async fn run(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    rect: Rect,
+    viewport: (f64, f64),
+) -> AppResult<()> {
     // 1. 立即隐藏 overlay（屏幕截图已在会话里，不再引用真实屏幕）。
-    hide_overlay(app)?;
+    hide_overlays(app)?;
 
     let state = app.state::<AppState>();
 
-    // 2. 取出快照会话，把 CSS 坐标换算成像素坐标并裁剪。
+    // 2. 取出快照会话，把 overlay 的 CSS 坐标换算成虚拟桌面逻辑坐标后裁剪。
     //    缩放比 = 截图像素 / overlay CSS 视口；视口由前端上报
-    //    （缩放显示器上唯一可信的来源），非法时退回 monitor 逻辑尺寸。
+    //    （缩放显示器上唯一可信的来源），非法时退回 1:1。
+    let monitor_index = overlay_index(window.label())
+        .ok_or_else(|| AppError::InvalidInput("not an OCR selection window".to_string()))?;
     let session = {
         let mut guard = state
             .ocr
@@ -310,39 +457,22 @@ async fn run(app: &AppHandle, rect: Rect, viewport: (f64, f64)) -> AppResult<()>
         guard.take()
     }
     .ok_or_else(|| AppError::InvalidInput("no active OCR capture session".to_string()))?;
-
-    let logical_width = if viewport.0.is_finite() && viewport.0 >= 1.0 {
-        viewport.0
-    } else {
-        session.logical_width
-    };
-    let logical_height = if viewport.1.is_finite() && viewport.1 >= 1.0 {
-        viewport.1
-    } else {
-        session.logical_height
-    };
-    let scale_x = f64::from(session.image.width) / logical_width;
-    let scale_y = f64::from(session.image.height) / logical_height;
-    let px_x = ((rect.x * scale_x).round() as i64).clamp(0, i64::from(session.image.width)) as u32;
-    let px_y = ((rect.y * scale_y).round() as i64).clamp(0, i64::from(session.image.height)) as u32;
-    let px_width = ((rect.width * scale_x).round() as u32).min(session.image.width - px_x);
-    let px_height = ((rect.height * scale_y).round() as u32).min(session.image.height - px_y);
+    let selection = session
+        .desktop
+        .selection_from_viewport(monitor_index, rect, viewport)?;
     tracing::debug!(
-        px_x,
-        px_y,
-        px_width,
-        px_height,
-        image_width = session.image.width,
-        image_height = session.image.height,
+        monitor = monitor_index,
+        x = selection.x,
+        y = selection.y,
+        width = selection.width,
+        height = selection.height,
         "cropping ocr selection"
     );
 
     popup::show(app, PopupState::Loading { source_text: None }).await?;
-    let capture = tauri::async_runtime::spawn_blocking(move || {
-        lingua_platform::crop_image(&session.image, [px_x, px_y, px_width, px_height])
-    })
-    .await
-    .map_err(|error| AppError::Internal(error.to_string()))??;
+    let capture = tauri::async_runtime::spawn_blocking(move || session.desktop.crop(&selection))
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))??;
 
     // 保留选区截图供「用 Vision 重新识别」手动重试：
     // tesseract 常见故障是高置信度的错，自动兜底触发不了。
@@ -408,9 +538,8 @@ async fn translate_and_show(
         let engine = match tokio::time::timeout(
             std::time::Duration::from_secs(2),
             tauri::async_runtime::spawn_blocking(move || {
-                pipeline::build_router(&database_for_router).and_then(|router| {
-                    router.provider_for(lingua_ai::AiTask::Translate)
-                })
+                pipeline::build_router(&database_for_router)
+                    .and_then(|router| router.provider_for(lingua_ai::AiTask::Translate))
             }),
         )
         .await

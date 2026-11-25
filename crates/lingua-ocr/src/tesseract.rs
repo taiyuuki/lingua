@@ -3,10 +3,45 @@
 //! 通过 `tesseract <image> stdout tsv` 拿到 TSV 输出，包含词级
 //! 包围盒与置信度；按 (block, par, line) 分组还原行/块结构。
 //! 需要本机安装 tesseract（macOS: `brew install tesseract`）。
+//!
+//! 可执行文件经 [`resolve_binary`] 定位：设置里的裸名先查 PATH，再探
+//! 常见安装目录 —— macOS 上从 Finder / Dock 启动的 GUI 进程拿不到登录
+//! shell 的 PATH，Homebrew 装的 tesseract 对它并不可见。
 
 use lingua_core::{AppError, AppResult, OcrBlock, OcrImage, OcrLine, OcrResult};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
+
+/// 定位 tesseract 可执行文件。
+///
+/// `configured` 是可执行文件路径或 PATH 中的名字。找不到时的提示同时给出
+/// 两种修法（安装 / 在设置里填完整路径）。
+fn resolve_binary(configured: &str) -> AppResult<PathBuf> {
+    // 只有 Windows 往 extra_dirs 里放东西。
+    #[allow(unused_mut)]
+    let mut extra_dirs = Vec::new();
+    #[cfg(target_os = "windows")]
+    {
+        // winget 包 `UB-Mannheim.TesseractOCR`（安装器）的默认安装目录；
+        // 安装时未勾选「Add to PATH」的话，应用只能在这里找到它。
+        for (variable, tail) in [
+            ("ProgramFiles", "Tesseract-OCR"),
+            ("ProgramFiles(x86)", "Tesseract-OCR"),
+            ("LocalAppData", "Programs/Tesseract-OCR"),
+        ] {
+            if let Some(base) = std::env::var_os(variable) {
+                extra_dirs.push(PathBuf::from(base).join(tail));
+            }
+        }
+    }
+    lingua_platform::resolve_executable(configured, &extra_dirs).map_err(|error| {
+        AppError::Platform(format!(
+            "{error}; install tesseract (e.g. `brew install tesseract` / `winget install \
+             UB-Mannheim.TesseractOCR`) or set its full path in Settings"
+        ))
+    })
+}
 
 pub struct TesseractOcrProvider {
     binary: Mutex<String>,
@@ -57,7 +92,8 @@ impl TesseractOcrProvider {
         std::fs::write(&path, &image.png)
             .map_err(|error| AppError::Ocr(format!("failed to stage image: {error}")))?;
 
-        let output = Command::new(self.binary())
+        let binary = resolve_binary(&self.binary())?;
+        let output = Command::new(&binary)
             .args([path.to_string_lossy().as_ref(), "stdout", "tsv"])
             .output();
 
@@ -79,19 +115,108 @@ impl TesseractOcrProvider {
                     Err(AppError::Ocr(format!("tesseract failed: {message}")))
                 }
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(AppError::Platform(
-                "tesseract is not installed or not in PATH; install it (e.g. `brew install \
-                 tesseract`) or set the path in Settings"
-                    .to_string(),
-            )),
+            // 「未安装」已在 resolve_binary 里给出带修法的提示；走到这里说明
+            // 文件在，但拉不起来（架构不符、权限不足等）。
             Err(error) => Err(AppError::Platform(format!(
-                "failed to run tesseract: {error}"
+                "failed to run tesseract at {}: {error}",
+                binary.display()
             ))),
         };
 
         let _ = std::fs::remove_file(&path);
         result
     }
+}
+
+/// tesseract 自检结果（设置页展示用）。任何一步失败都不返回 `Err`，
+/// 而是落到 `error`，让用户看到「实际用的是哪个文件、哪里不对」。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TesseractStatus {
+    pub ok: bool,
+    /// 实际使用的可执行文件（裸名经 PATH / 常见安装目录解析后的路径）。
+    pub path: Option<String>,
+    /// 版本号，如 `5.5.3`。
+    pub version: Option<String>,
+    /// 已安装的语言包（`--list-langs`），如 `["eng", "osd"]`。
+    pub languages: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// 自检：定位可执行文件并读取版本与语言包列表。阻塞调用，
+/// 上层用 `spawn_blocking` 包裹。
+pub fn tesseract_status(configured: &str) -> TesseractStatus {
+    let binary = match resolve_binary(configured) {
+        Ok(binary) => binary,
+        Err(error) => {
+            return TesseractStatus {
+                error: Some(error.to_string()),
+                ..Default::default()
+            };
+        }
+    };
+    let mut status = TesseractStatus {
+        path: Some(binary.display().to_string()),
+        ..Default::default()
+    };
+    let run = |args: &[&str]| Command::new(&binary).args(args).output();
+
+    match run(&["--version"]) {
+        Ok(output) if output.status.success() => {
+            // 首行形如 `tesseract 5.5.3`。
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            status.version = Some(
+                first_line(&stdout)
+                    .trim_start_matches("tesseract")
+                    .trim()
+                    .to_string(),
+            );
+        }
+        Ok(output) => {
+            status.error = Some(format!(
+                "tesseract --version failed: {}",
+                first_line(&String::from_utf8_lossy(&output.stderr))
+            ));
+            return status;
+        }
+        Err(error) => {
+            status.error = Some(format!(
+                "failed to run tesseract at {}: {error}",
+                binary.display()
+            ));
+            return status;
+        }
+    }
+
+    match run(&["--list-langs"]) {
+        Ok(output) if output.status.success() => {
+            // 首行是「List of available languages in ... (N):」，其余每行一个语言包。
+            status.languages = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .skip(1)
+                .map(str::trim)
+                .filter(|language| !language.is_empty())
+                .map(str::to_string)
+                .collect();
+        }
+        Ok(output) => {
+            status.error = Some(format!(
+                "tesseract --list-langs failed: {}",
+                first_line(&String::from_utf8_lossy(&output.stderr))
+            ));
+            return status;
+        }
+        Err(error) => {
+            status.error = Some(format!(
+                "failed to run tesseract at {}: {error}",
+                binary.display()
+            ));
+            return status;
+        }
+    }
+
+    status.ok = true;
+    status
 }
 
 #[async_trait::async_trait]
@@ -324,5 +449,29 @@ mod tests {
         );
         assert!(result.is_empty());
         assert!(result.blocks.is_empty());
+    }
+
+    /// 真机自检（默认忽略）：裸名能定位到本机 tesseract，版本与语言包解析正确。
+    /// `cargo test -p lingua-ocr reports_real_tesseract -- --ignored --nocapture`
+    #[test]
+    #[ignore = "依赖本机安装的 tesseract"]
+    fn reports_real_tesseract() {
+        let status = tesseract_status("tesseract");
+        println!("{status:?}");
+        assert!(status.ok, "{status:?}");
+        let path = status.path.unwrap_or_default();
+        assert!(
+            path.ends_with("tesseract") || path.ends_with("tesseract.exe"),
+            "{path}"
+        );
+        assert!(status.version.is_some_and(|version| !version.is_empty()));
+    }
+
+    #[test]
+    fn missing_binary_reports_error_not_panic() {
+        let status = tesseract_status("lingua-no-such-tesseract-binary");
+        assert!(!status.ok);
+        assert!(status.path.is_none());
+        assert!(status.error.is_some());
     }
 }

@@ -2605,6 +2605,7 @@ dependencies = [
  "async-trait",
  "lingua-ai",
  "lingua-core",
+ "lingua-platform",
  "reqwest",
  "serde",
  "serde_json",

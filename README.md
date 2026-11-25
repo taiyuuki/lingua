@@ -44,11 +44,14 @@ lingua/
 2. 在任意应用中选中文本，按 `alt+t`（可在设置里改）。
 3. 翻译结果在光标所在屏幕居中的 Popup 中显示（多显示器跟随光标）；
    `Esc` 或点击外部关闭。
-4. 按 `alt+s`（可在设置里改）或点主窗口「截图翻译」按钮 → 在屏幕上
-   拖拽框选 → 识别的文字自动走 AI 翻译并在 Popup 显示。快捷键入口
-   截**光标所在**显示器（多屏幕用这个），按钮入口截主窗口所在屏。
+4. 按 `alt+s`（可在设置里改）或点主窗口「截图翻译」按钮 → **所有显示器**
+   同时冻结 → 拖拽框选（可以从一块屏起笔、拖到另一块屏松手）→ 识别的
+   文字自动走 AI 翻译并在 Popup 显示；`Esc` 或右键取消。
    OCR 引擎在「路由与快捷键」里配置（默认本机 tesseract；PaddleOCR
    走 `scripts/paddleocr_server.py` sidecar，部署见 docs/PADDLEOCR.md）。
+   tesseract 路径填裸名即可：应用依次在 PATH、Homebrew（`/opt/homebrew/bin`、
+   `/usr/local/bin`）等常见安装目录里查找；设置页的「检测 tesseract」
+   会显示实际使用的路径、版本与已装语言包。
    识别为空或置信度偏低时，若配置了开启「视觉」能力的 Provider 会
    自动用它重新识别兜底；Popup 工具栏也可手动「用 Vision 重新识别」。
 5. （可选）在「词典」卡片导入 TSV 词典：翻译单词时优先命中本地词典，
@@ -67,11 +70,13 @@ lingua/
 - Rust 1.85+（`rustup`）
 - Node.js 20.19+ / 22.12+，包管理器用 **pnpm**
 - macOS：Xcode Command Line Tools；OCR 需要 `brew install tesseract`
-  （或用 PaddleOCR sidecar），并授予「屏幕录制」权限
+  （或用 PaddleOCR sidecar），并授予「屏幕录制」权限。Homebrew 装的
+  tesseract 会被自动找到（GUI 应用的 PATH 里没有 `/opt/homebrew/bin`，
+  所以不能只靠 PATH）；装在别处时在设置里填完整路径
 - Windows：MSVC 工具链 + WebView2（Win11 自带）；OCR 建议
-  `winget install UB-Mannheim.TesseractOCR`，在「路由与快捷键」里
-  把 tesseract 路径指向安装目录（如
-  `C:\Program Files\Tesseract-OCR\tesseract.exe`）
+  `winget install UB-Mannheim.TesseractOCR`，默认安装目录
+  （`C:\Program Files\Tesseract-OCR`）会被自动查找；装到别处再在
+  设置里填完整路径
 - Linux：`webkit2gtk-4.1`、`libappindicator` 等开发包（见 Tauri 官方指引）
 
 ## 常用命令
@@ -86,7 +91,7 @@ pnpm lint               # ESLint
 pnpm test               # vitest 前端测试
 
 cargo check --workspace --all-targets   # Rust 快速检查
-cargo test --workspace                  # Rust 测试（91 个）
+cargo test --workspace                  # Rust 测试（206 个：200 通过 + 6 个真机自检默认忽略）
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
@@ -109,7 +114,7 @@ RUST_LOG=lingua=debug pnpm tauri dev
 | 前端安装 | `pnpm install` | ✅ |
 | 前端构建 | `pnpm build` | ✅（main + popup 双入口） |
 | Rust 检查 | `cargo check --workspace --all-targets` | ✅ |
-| Rust 测试 | `cargo test --workspace` | ✅ 168 passed |
+| Rust 测试 | `cargo test --workspace` | ✅ 200 passed（另 6 个真机自检默认忽略） |
 | Lint | `cargo clippy -D warnings` / `pnpm lint` | ✅ |
 | 应用链接 | `cargo build --workspace` | ✅ |
 | 划词→翻译→Popup 全链路 | `pnpm tauri dev` 手动验证 | ⚠️ 需真机人工验证 |

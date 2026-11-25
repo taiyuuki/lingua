@@ -263,9 +263,7 @@ pub async fn show(app: &AppHandle, state: PopupState) -> AppResult<()> {
     // 多显示器下重复触发会让弹窗跟随光标所在的屏幕。
     let already_visible = window.is_visible().map_err(platform_error)?;
     if !already_visible || matches!(state, PopupState::Loading { .. }) {
-        if let Err(error) =
-            window.set_size(tauri::LogicalSize::new(POPUP_WIDTH, POPUP_HEIGHT))
-        {
+        if let Err(error) = window.set_size(tauri::LogicalSize::new(POPUP_WIDTH, POPUP_HEIGHT)) {
             tracing::warn!(error = %error, "failed to reset popup size");
         }
         position_popup(app, &window);

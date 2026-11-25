@@ -14,7 +14,8 @@ import {
 } from "naive-ui";
 import { useProvidersStore } from "../stores/providers";
 import { SUPPORTED_TARGET_LANGUAGES, useSettingsStore } from "../stores/settings";
-import { autostartEnabled, setAutostart } from "../lib/api";
+import { autostartEnabled, ocrEngineStatus, setAutostart, type TesseractStatus } from "../lib/api";
+import { describeError } from "../lib/errors";
 
 const providersStore = useProvidersStore();
 const settingsStore = useSettingsStore();
@@ -79,14 +80,58 @@ const ocrProviderOptions = [
   { label: '本地 HTTP 服务', value: 'http' },
 ];
 
+// tesseract 自检：裸名会被解析成实际路径 —— macOS 上从 Finder / Dock 启动的
+// 应用看不到登录 shell 的 PATH，这里把「实际用的是哪个文件」亮出来。
+const tesseractStatus = ref<TesseractStatus | null>(null);
+const checkingTesseract = ref(false);
+
+/** 没装任何 CJK 语言包时提示补装：tesseract 默认只带 eng，中文会识别成乱码或空。 */
+const CJK_LANGUAGES = ["chi_sim", "chi_tra", "jpn", "kor"];
+
+const tesseractSummary = computed(() => {
+  const status = tesseractStatus.value;
+  if (!status?.ok) {
+    return "";
+  }
+  const languages = status.languages.length > 0 ? status.languages.join(", ") : "无";
+  const cjkMissing = !status.languages.some((language) => CJK_LANGUAGES.includes(language));
+  const cjkHint = cjkMissing
+    ? "；识别中 / 日 / 韩文需另装语言包（macOS: brew install tesseract-lang）"
+    : "";
+  return `已找到 ${status.path ?? ""}（${status.version ?? "版本未知"}）· 语言包：${languages}${cjkHint}`;
+});
+
+/** 用输入框里的当前值自检（未保存也可检测）。 */
+async function checkTesseract(): Promise<void> {
+  checkingTesseract.value = true;
+  try {
+    tesseractStatus.value = await ocrEngineStatus(ocrTesseractPath.value);
+  } catch (error) {
+    tesseractStatus.value = {
+      ok: false,
+      path: null,
+      version: null,
+      languages: [],
+      error: describeError(error),
+    };
+  } finally {
+    checkingTesseract.value = false;
+  }
+}
+
 // Prompt 变量提示（模板里不能直接写字面 {{...}}，会被解析成插值）。
 const PROMPT_VARS = ["target_language", "source_language", "mode", "context", "same_language_rule"]
   .map((name) => `{{${name}}}`)
   .join(" ");
 
 onMounted(() => {
-  void settingsStore.load();
   void providersStore.load();
+  // 设置加载完，用已保存的路径先自检一次 tesseract。
+  void settingsStore.load().then(() => {
+    if (ocrProvider.value === "tesseract") {
+      void checkTesseract();
+    }
+  });
 });
 
 // 开机自启由 autostart 插件管理（不落 settings 表），本地状态即可；
@@ -170,7 +215,7 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
         <n-form-item label="截图快捷键">
           <n-input
             v-model:value="ocrShortcut"
-            placeholder="alt+s（截光标所在屏幕）"
+            placeholder="alt+s（冻结所有屏幕，可跨屏框选）"
           />
         </n-form-item>
       </div>
@@ -235,7 +280,7 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
           <n-input
             v-if="ocrProvider === 'tesseract'"
             v-model:value="ocrTesseractPath"
-            placeholder="tesseract（Windows: winget install UB-Mannheim.TesseractOCR）"
+            placeholder="tesseract（默认即可：自动在 PATH 与 Homebrew 等常见目录里查找）"
           />
           <n-input
             v-else
@@ -243,6 +288,34 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
             placeholder="http://127.0.0.1:8433/ocr"
           />
         </n-form-item>
+        <!-- 自检结果：明示实际使用的可执行文件，「装了却提示未安装」时才有据可查。 -->
+        <div
+          v-if="ocrProvider === 'tesseract'"
+          class="span-2 ocr-engine-status"
+        >
+          <n-button
+            size="tiny"
+            secondary
+            :loading="checkingTesseract"
+            @click="checkTesseract"
+          >
+            检测 tesseract
+          </n-button>
+          <n-text
+            v-if="tesseractStatus?.ok"
+            type="success"
+            class="ocr-engine-status-text"
+          >
+            {{ tesseractSummary }}
+          </n-text>
+          <n-text
+            v-else-if="tesseractStatus?.error"
+            type="error"
+            class="ocr-engine-status-text"
+          >
+            {{ tesseractStatus.error }}
+          </n-text>
+        </div>
       </div>
 
       <p class="form-section-title">
@@ -320,5 +393,17 @@ async function onAutostartChange(enabled: boolean): Promise<void> {
   flex-flow: row wrap;
   align-items: center;
   gap: 8px 12px;
+}
+
+.ocr-engine-status {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.ocr-engine-status-text {
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 </style>

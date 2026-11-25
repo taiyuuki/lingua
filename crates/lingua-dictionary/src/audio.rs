@@ -9,7 +9,10 @@
 //! 进内存（几 MB），音频按需 seek + 解压单个 record 块读出。
 
 use crate::html_sanitize::normalize_resource_path;
-use crate::mdx::{RecordBlockLayout, Reader, decompress_block, parse_header, parse_key_section, parse_record_blocks};
+use crate::mdx::{
+    Reader, RecordBlockLayout, decompress_block, parse_header, parse_key_section,
+    parse_record_blocks,
+};
 use lingua_core::{AppError, AppResult};
 use std::collections::HashMap;
 use std::path::Path;
@@ -46,8 +49,12 @@ impl MddResourceFile {
             AppError::InvalidInput(format!("无法读取 `{}`：{error}", path.display()))
         })?;
         let length_bytes = read_at(&mut file, 0, 4)?;
-        let header_len = u32::from_be_bytes([length_bytes[0], length_bytes[1], length_bytes[2], length_bytes[3]])
-            as usize;
+        let header_len = u32::from_be_bytes([
+            length_bytes[0],
+            length_bytes[1],
+            length_bytes[2],
+            length_bytes[3],
+        ]) as usize;
         // parse_header 只从头读（长度 + 属性文本 + 校验），传前缀即可。
         let prefix = read_at(&mut file, 0, 4 + header_len + 4)?;
         let (header, key_section_start) = parse_header(&prefix)?;
@@ -69,7 +76,11 @@ impl MddResourceFile {
         let key_blocks_len = reader.number(v2)? as usize;
         let key_body_start = key_section_start + key_summary_len;
         let key_index_raw = read_at(&mut file, key_body_start, key_index_comp_len)?;
-        let key_blocks_raw = read_at(&mut file, key_body_start + key_index_comp_len, key_blocks_len)?;
+        let key_blocks_raw = read_at(
+            &mut file,
+            key_body_start + key_index_comp_len,
+            key_blocks_len,
+        )?;
         let keys = parse_key_section(
             &header,
             num_key_blocks,
@@ -142,9 +153,10 @@ impl MddResourceFile {
             return Ok(None);
         }
         let raw = {
-            let mut file = self.file.lock().map_err(|_| {
-                AppError::Internal("mdd 文件句柄锁中毒".to_string())
-            })?;
+            let mut file = self
+                .file
+                .lock()
+                .map_err(|_| AppError::Internal("mdd 文件句柄锁中毒".to_string()))?;
             read_at(&mut file, block.file_offset, block.comp_len)?
         };
         let data = decompress_block(&raw, self.v2, block.decomp_len, "record 块")?;
@@ -207,7 +219,7 @@ fn strip_suffix_ci<'a>(text: &'a str, suffixes: &[&str]) -> Option<&'a str> {
     suffixes.iter().find_map(|suffix| {
         (text.len() > suffix.len()
             && text[(text.len() - suffix.len())..].eq_ignore_ascii_case(suffix))
-            .then(|| &text[..text.len() - suffix.len()])
+        .then(|| &text[..text.len() - suffix.len()])
     })
 }
 
@@ -297,21 +309,21 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
-    use flate2::write::ZlibEncoder;
     use flate2::Compression;
+    use flate2::write::ZlibEncoder;
     use std::io::Write as _;
 
     #[test]
     fn extracts_word_audio_from_realistic_key_styles() {
         let keys: Vec<String> = [
-            r"\'bout.spx",                 // 裸名（美音）
-            r"\'bout_Uk.spx",              // 英音后缀
-            r"\uk\accidence__gb_1.spx",    // 口音目录 + gb 后缀 + 序号
-            r"\us\_speak_1_us_3.spx",      // 前缀词 + 序号 + 口音 + 序号
-            r"\pic\accordion.jpg",         // 非音频
-            r"\SPX\0001.spx",              // 纯数字（NHK）
-            r"\us_pron.png",               // 非音频
-            r"\hello.MP3",                 // 大写扩展名
+            r"\'bout.spx",              // 裸名（美音）
+            r"\'bout_Uk.spx",           // 英音后缀
+            r"\uk\accidence__gb_1.spx", // 口音目录 + gb 后缀 + 序号
+            r"\us\_speak_1_us_3.spx",   // 前缀词 + 序号 + 口音 + 序号
+            r"\pic\accordion.jpg",      // 非音频
+            r"\SPX\0001.spx",           // 纯数字（NHK）
+            r"\us_pron.png",            // 非音频
+            r"\hello.MP3",              // 大写扩展名
         ]
         .into_iter()
         .map(str::to_string)
@@ -322,12 +334,24 @@ mod tests {
                 .iter()
                 .find(|entry| entry.word == word && entry.accent == accent)
         };
-        assert_eq!(find("'bout", Accent::Us).unwrap().resource_path, "'bout.spx");
-        assert_eq!(find("'bout", Accent::Uk).unwrap().resource_path, "'bout_Uk.spx");
+        assert_eq!(
+            find("'bout", Accent::Us).unwrap().resource_path,
+            "'bout.spx"
+        );
+        assert_eq!(
+            find("'bout", Accent::Uk).unwrap().resource_path,
+            "'bout_Uk.spx"
+        );
         let gb = find("accidence", Accent::Uk).unwrap();
         assert_eq!(gb.resource_path, "uk/accidence__gb_1.spx");
-        assert_eq!(find("speak", Accent::Us).unwrap().resource_path, "us/_speak_1_us_3.spx");
-        assert_eq!(find("hello", Accent::Us).unwrap().resource_path, "hello.MP3");
+        assert_eq!(
+            find("speak", Accent::Us).unwrap().resource_path,
+            "us/_speak_1_us_3.spx"
+        );
+        assert_eq!(
+            find("hello", Accent::Us).unwrap().resource_path,
+            "hello.MP3"
+        );
         // 图片 / 纯数字一律不进索引。
         assert_eq!(entries.len(), 5, "{entries:?}");
     }
@@ -467,9 +491,8 @@ mod tests {
     #[test]
     #[ignore = "需要本机的英式美式发音库文件"]
     fn opens_real_sound_library() {
-        let path = Path::new(
-            r"C:\Users\falwy\Documents\dict词库\发音库\英式美式发音库\Sound_us_uk.mdd",
-        );
+        let path =
+            Path::new(r"C:\Users\falwy\Documents\dict词库\发音库\英式美式发音库\Sound_us_uk.mdd");
         if !path.is_file() {
             return;
         }
@@ -479,12 +502,16 @@ mod tests {
         let entries = extract_audio_entries(library.keys());
         assert!(entries.len() > 200_000, "{}", entries.len());
         // the 的英/美音都应在。
-        assert!(entries
-            .iter()
-            .any(|entry| entry.word == "the" && entry.accent == Accent::Us));
-        assert!(entries
-            .iter()
-            .any(|entry| entry.word == "the" && entry.accent == Accent::Uk));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.word == "the" && entry.accent == Accent::Us)
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.word == "the" && entry.accent == Accent::Uk)
+        );
 
         let the = entries
             .iter()

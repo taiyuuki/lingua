@@ -146,15 +146,15 @@ mod tests {
 
     #[test]
     fn result_serializes_camel_case() {
-    let result = TranslationResult {
-        source_text: "hello".into(),
-        translated_text: "你好".into(),
-        detected_language: Some(Language::En),
-        alternatives: vec!["您好".into()],
-        explanation: None,
-        dictionaries: Vec::new(),
-        model: Some("test-model".into()),
-    };
+        let result = TranslationResult {
+            source_text: "hello".into(),
+            translated_text: "你好".into(),
+            detected_language: Some(Language::En),
+            alternatives: vec!["您好".into()],
+            explanation: None,
+            dictionaries: Vec::new(),
+            model: Some("test-model".into()),
+        };
         let json = serde_json::to_value(&result).unwrap();
         assert!(json.get("translatedText").is_some());
         assert!(json.get("detectedLanguage").is_some());

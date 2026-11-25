@@ -6,8 +6,8 @@
 #![allow(clippy::expect_used)]
 
 use lingua_core::Language;
-use lingua_dictionary::mdx::MdxFile;
 use lingua_database::Database;
+use lingua_dictionary::mdx::MdxFile;
 use std::time::Instant;
 
 const BATCH: usize = 5_000;
@@ -16,7 +16,9 @@ fn main() {
     let path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "usage: mdx_bench <file.mdx>".to_string());
-    let lemma = std::env::args().nth(2).unwrap_or_else(|| "test".to_string());
+    let lemma = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "test".to_string());
 
     let started = Instant::now();
     let dict = MdxFile::open(std::path::Path::new(&path)).expect("open mdx");
@@ -57,7 +59,9 @@ fn main() {
                 "bench",
             )
             .expect("convert batch");
-            imported += database.import_dictionary(&meta, &batch).expect("import batch");
+            imported += database
+                .import_dictionary(&meta, &batch)
+                .expect("import batch");
             raw_batch.clear();
         }
     }
@@ -69,7 +73,9 @@ fn main() {
             "bench",
         )
         .expect("convert last batch");
-        imported += database.import_dictionary(&meta, &batch).expect("import last batch");
+        imported += database
+            .import_dictionary(&meta, &batch)
+            .expect("import last batch");
     }
     println!(
         "import: {:?} ({imported} written, {skipped} redirects skipped)",
@@ -77,9 +83,7 @@ fn main() {
     );
 
     let lookup_started = Instant::now();
-    let hits = database
-        .lookup_entries(&lemma, None)
-        .expect("lookup");
+    let hits = database.lookup_entries(&lemma, None).expect("lookup");
     println!(
         "lookup `{lemma}`: {:?} ({} hits)",
         lookup_started.elapsed(),

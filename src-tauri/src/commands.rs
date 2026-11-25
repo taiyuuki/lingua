@@ -354,7 +354,7 @@ pub struct AppSettingsDto {
     #[serde(default)]
     pub prompt_translate_stream: String,
     pub shortcut: String,
-    /// 截图翻译快捷键（默认 alt+s；多显示器下跟随光标所在屏）。
+    /// 截图翻译快捷键（默认 alt+s；冻结所有显示器，焦点在光标所在屏）。
     pub ocr_shortcut: String,
     /// 界面主题：light | dark。
     pub ui_theme: String,
@@ -1331,7 +1331,9 @@ pub async fn delete_audio_library(
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
     {
-        return Err(AppError::InvalidInput("invalid audio library id".to_string()));
+        return Err(AppError::InvalidInput(
+            "invalid audio library id".to_string(),
+        ));
     }
     if let Some(app_state) = app.try_state::<AppState>() {
         if let Ok(mut cache) = app_state.audio_files.lock() {
@@ -1807,7 +1809,8 @@ pub async fn clear_history(state: tauri::State<'_, AppState>) -> Result<usize, A
 
 // ---------- OCR 截图翻译（Phase 5） ----------
 
-/// 打开全屏选区 overlay（先预检屏幕录制权限，未授予则触发系统授权框）。
+/// 冻结所有显示器并打开选区 overlay（先预检屏幕录制权限，未授予则触发
+/// 系统授权框）。每块屏一个 overlay，框选可以跨屏。
 #[tauri::command]
 pub async fn start_ocr_capture(app: tauri::AppHandle) -> Result<(), AppError> {
     if !lingua_platform::screen_recording_granted() {
@@ -1823,18 +1826,22 @@ pub async fn start_ocr_capture(app: tauri::AppHandle) -> Result<(), AppError> {
     crate::ocr::start_capture(&app).await
 }
 
-/// 当前 OCR 会话的整屏截图（data URL）；overlay 挂载后拉取。
+/// 发起调用的 overlay 窗口铺在哪块显示器上（逻辑坐标矩形 + 该屏冻结截图）；
+/// overlay 挂载后与每次会话更新时拉取。
 #[tauri::command]
-pub async fn get_ocr_background(app: tauri::AppHandle) -> Result<Option<String>, AppError> {
-    crate::ocr::current_background(&app)
+pub async fn get_ocr_surface(
+    window: tauri::WebviewWindow,
+) -> Result<Option<crate::ocr::OcrSurface>, AppError> {
+    crate::ocr::current_surface(&window)
 }
 
-/// 用户框选完成：坐标为 overlay CSS 像素；viewport 是 overlay 自身的
-/// CSS 视口尺寸 —— HiDPI 下像素↔CSS 换算的自校准基准（前端是唯一
-/// 可信的 CSS 尺寸来源，Rust 侧按 monitor 推断在缩放显示器上不可靠）。
+/// 用户框选完成：坐标为**发起框选的 overlay** 的 CSS 像素（跨屏拖拽时可以
+/// 越出该屏）；viewport 是该 overlay 自身的 CSS 视口尺寸 —— HiDPI 下
+/// 像素↔CSS 换算的自校准基准（前端是唯一可信的 CSS 尺寸来源，Rust 侧按
+/// monitor 推断在缩放显示器上不可靠）。
 #[tauri::command]
 pub async fn perform_ocr_translation(
-    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     x: f64,
     y: f64,
     width: f64,
@@ -1845,8 +1852,10 @@ pub async fn perform_ocr_translation(
     if width < 8.0 || height < 8.0 {
         return Err(AppError::InvalidInput("selection is too small".to_string()));
     }
+    let app = window.app_handle().clone();
     crate::ocr::run_ocr_pipeline(
         app,
+        window,
         lingua_core::Rect {
             x,
             y,
@@ -1859,10 +1868,25 @@ pub async fn perform_ocr_translation(
     Ok(())
 }
 
-/// 取消选区（Esc）。
+/// 取消选区（Esc / 右键）：隐藏所有显示器上的 overlay。
 #[tauri::command]
 pub async fn cancel_ocr(app: tauri::AppHandle) -> Result<(), AppError> {
-    crate::ocr::hide_overlay(&app)
+    crate::ocr::hide_overlays(&app).map(|_| ())
+}
+
+/// tesseract 自检（设置页展示）：`path` 是表单里的路径或裸名，未保存也能
+/// 检测。自检失败不算命令失败，结果落到 `error`。
+#[tauri::command]
+pub async fn ocr_engine_status(path: String) -> Result<lingua_ocr::TesseractStatus, AppError> {
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        return Err(AppError::InvalidInput(
+            "tesseract path is empty".to_string(),
+        ));
+    }
+    tauri::async_runtime::spawn_blocking(move || lingua_ocr::tesseract_status(&path))
+        .await
+        .map_err(|error| AppError::Internal(error.to_string()))
 }
 
 /// 屏幕录制权限状态。
@@ -2129,7 +2153,12 @@ mod tests {
             })
             .collect();
         let written = database
-            .replace_audio_library("al-e2e", "英式美式发音库", &destination.display().to_string(), &records)
+            .replace_audio_library(
+                "al-e2e",
+                "英式美式发音库",
+                &destination.display().to_string(),
+                &records,
+            )
             .unwrap();
         assert_eq!(written, entries.len(), "词头索引应全部写入");
 

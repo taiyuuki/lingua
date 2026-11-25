@@ -212,7 +212,8 @@ impl Database {
             let new_order = position
                 .get(id.as_str())
                 .copied()
-                .unwrap_or_else(|| tail_start + old_order.max(0) as usize + 1) as i64;
+                .unwrap_or_else(|| tail_start + old_order.max(0) as usize + 1)
+                as i64;
             tx.execute(
                 "UPDATE dictionaries SET sort_order = ?2 WHERE id = ?1",
                 params![id, new_order],
@@ -456,18 +457,27 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         db.migrate().unwrap();
         for id in ["a", "b", "c"] {
-            db.import_dictionary(&meta(id), &[entry("cat", id)]).unwrap();
+            db.import_dictionary(&meta(id), &[entry("cat", id)])
+                .unwrap();
         }
         // 初始按导入顺序。
         assert_eq!(
-            db.list_dictionaries().unwrap().iter().map(|d| d.meta.id.clone()).collect::<Vec<_>>(),
+            db.list_dictionaries()
+                .unwrap()
+                .iter()
+                .map(|d| d.meta.id.clone())
+                .collect::<Vec<_>>(),
             vec!["a", "b", "c"]
         );
         // 手动排序：b 提到最前。
         db.reorder_dictionaries(&["b".into(), "c".into(), "a".into()])
             .unwrap();
         assert_eq!(
-            db.list_dictionaries().unwrap().iter().map(|d| d.meta.id.clone()).collect::<Vec<_>>(),
+            db.list_dictionaries()
+                .unwrap()
+                .iter()
+                .map(|d| d.meta.id.clone())
+                .collect::<Vec<_>>(),
             vec!["b", "c", "a"]
         );
         let results = db.lookup_entries("cat", None).unwrap();

@@ -5,6 +5,7 @@
 //! 通过 `cfg(target_os = ...)` 隔离，绝不出现在 src-tauri 与前端里。
 
 pub mod capture;
+pub mod exec;
 pub mod os;
 pub mod selection;
 pub mod selection_service;
@@ -17,8 +18,10 @@ pub mod macos;
 pub mod windows;
 
 pub use capture::{
-    capture_region, crop_image, request_screen_recording_access, screen_recording_granted,
+    DesktopCapture, MonitorCapture, MonitorGeometry, capture_monitor, crop_image,
+    request_screen_recording_access, screen_recording_granted,
 };
+pub use exec::resolve_executable;
 pub use os::{Os, current_os, open_accessibility_settings};
 pub use selection::SelectionProvider;
 pub use selection_service::SelectionService;

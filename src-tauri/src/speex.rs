@@ -110,7 +110,11 @@ mod tests {
         assert_eq!(&wav[8..12], b"WAVE");
         let sample_rate = u32::from_le_bytes(wav[24..28].try_into().unwrap());
         let data_len = u32::from_le_bytes(wav[40..44].try_into().unwrap()) as usize;
-        eprintln!("wav: {} bytes, {sample_rate} Hz, {:.2}s", wav.len(), data_len as f64 / 2.0 / sample_rate as f64);
+        eprintln!(
+            "wav: {} bytes, {sample_rate} Hz, {:.2}s",
+            wav.len(),
+            data_len as f64 / 2.0 / sample_rate as f64
+        );
         assert!(sample_rate == 8000 || sample_rate == 16000 || sample_rate == 32000);
         assert!(data_len > 1600, "时长应明显大于 0.05s");
     }

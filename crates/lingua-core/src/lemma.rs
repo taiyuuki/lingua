@@ -84,7 +84,8 @@ pub fn lemma_candidates(word: &str) -> Vec<String> {
 }
 
 fn i_to_y(stem: &str) -> String {
-    stem.strip_suffix('i').map_or_else(|| stem.to_string(), |head| format!("{head}y"))
+    stem.strip_suffix('i')
+        .map_or_else(|| stem.to_string(), |head| format!("{head}y"))
 }
 
 /// 双写辅音还原：running→run、shopping→shop（词干 ≥4 且末两位
@@ -113,8 +114,11 @@ mod tests {
 
     #[test]
     fn generates_expected_lemmas() {
-        assert!(contains("upscale", &lemma_candidates("upscaling")), "{:?}",
-            lemma_candidates("upscaling"));
+        assert!(
+            contains("upscale", &lemma_candidates("upscaling")),
+            "{:?}",
+            lemma_candidates("upscaling")
+        );
         assert!(contains("make", &lemma_candidates("making")));
         assert!(contains("run", &lemma_candidates("running")));
         assert!(contains("shop", &lemma_candidates("shopping")));

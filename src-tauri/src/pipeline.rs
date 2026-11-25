@@ -91,10 +91,7 @@ async fn run(app: &AppHandle) -> AppResult<()> {
 
     // 3. 先查词典（不碰 Keychain——单词/词组命中即出结果，授权面板
     //    被搁置也拖不慢词典）。
-    let request = TranslationRequest::new(
-        selected.text.clone(),
-        target_language(&state.database)?,
-    );
+    let request = TranslationRequest::new(selected.text.clone(), target_language(&state.database)?);
     let dictionary_probe = TranslationEngine::without_provider().with_dictionary(Some(Arc::new(
         SqliteDictionaryProvider::new(state.database.clone()),
     )));

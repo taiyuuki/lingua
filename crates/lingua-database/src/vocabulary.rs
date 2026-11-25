@@ -306,23 +306,22 @@ impl Database {
                     merged.push(tag.clone());
                 }
             }
-            let tags_json = serde_json::to_string(&merged)
-                .map_err(|error| db_err(rusqlite::Error::ToSqlConversionFailure(Box::new(error))))?;
+            let tags_json = serde_json::to_string(&merged).map_err(|error| {
+                db_err(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
+            })?;
             let changed = match mastery {
-                Some(mastery) => {
-                    tx.execute(
+                Some(mastery) => tx
+                    .execute(
                         "UPDATE vocabulary SET mastery = ?2, tags = ?3 WHERE id = ?1",
                         params![id, mastery.to_db(), tags_json],
                     )
-                    .map_err(db_err)?
-                }
-                None if !add_tags.is_empty() => {
-                    tx.execute(
+                    .map_err(db_err)?,
+                None if !add_tags.is_empty() => tx
+                    .execute(
                         "UPDATE vocabulary SET tags = ?2 WHERE id = ?1",
                         params![id, tags_json],
                     )
-                    .map_err(db_err)?
-                }
+                    .map_err(db_err)?,
                 None => 0,
             };
             updated += changed;

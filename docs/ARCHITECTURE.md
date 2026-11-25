@@ -29,11 +29,11 @@ OS / Network / SQLite / Models
 | Crate | 职责 | 状态 |
 |-------|------|------|
 | `lingua-core` | 领域模型：`AppError`（含 `NoSelection`）、`Language`、`SelectedText`、`TranslationRequest/Result`，IPC 序列化契约（camelCase） | ✅ Phase 0/1 |
-| `lingua-platform` | `SelectionProvider` + `SelectionService`；macOS 实现（AX 选区 + 剪贴板 fallback + 光标/截图：`screencapture` CLI + 屏幕录制权限 FFI）；Windows 实现（UI Automation TextPattern 选区 + 剪贴板 fallback（SendInput Ctrl+C）+ 光标（GetCursorPos + 显示器 DPI 换算）+ GDI 截图）；Linux 明确占位 | ✅ macOS Phase 1/5、Windows |
+| `lingua-platform` | `SelectionProvider` + `SelectionService`；macOS 实现（AX 选区 + 剪贴板 fallback + 光标/截图：`screencapture` CLI + 屏幕录制权限 FFI）；Windows 实现（UI Automation TextPattern 选区 + 剪贴板 fallback（SendInput Ctrl+C）+ 光标（GetCursorPos + 显示器 DPI 换算）+ GDI 截图）；Linux 明确占位；跨平台纯逻辑：`resolve_executable`（外部工具定位：PATH → 工具专属目录 → Homebrew / MacPorts 等常见安装目录，GUI 进程的 PATH 里没有它们）、`MonitorGeometry` / `DesktopCapture`（逐屏截图 + 虚拟桌面逻辑坐标下的选区裁剪，跨屏选区拼接、混合 DPI 重采样） | ✅ macOS Phase 1/5、Windows |
 | `lingua-ai` | `AIProvider` trait（含 `vision`）、`OpenAiCompatibleProvider`（reqwest/rustls；chat/SSE/多模态 image_url）、`AIRouter`（AiTask → Provider 路由 + 默认回退 + Vision 能力分派）、`ProviderConfig`（api_key 不序列化） | ✅ Phase 1/2/6 |
 | `lingua-translation` | Translation Engine：单词 → 词典优先（释义语言须匹配目标语言），未命中/短语/句子 → AI；`prompts/translate/` 模板内嵌；AI JSON 解析失败优雅降级；同语言换向（`{{same_language_rule}}` 变量注入）；自定义 system prompt 覆盖（`PromptOverride`）；`StudyAnalyzer` 学习分析（`prompts/study/`，解析失败降级 notes） | ✅ Phase 1/3/9 |
 | `lingua-dictionary` | `DictionaryProvider` trait、SQLite 词典实现、TSV 导入器（CC-CEDICT 等公开词典可先转 TSV 再导入） | ✅ Phase 3 |
-| `lingua-ocr` | `OcrProvider` trait、Tesseract CLI 实现、HTTP sidecar 实现（PaddleOCR 契约）、`VisionOcrProvider`（vision 能力 AIProvider 的高级 fallback，输出复用 `OcrResult`） | ✅ Phase 5/6 |
+| `lingua-ocr` | `OcrProvider` trait、Tesseract CLI 实现（可执行文件经 `lingua_platform::resolve_executable` 定位，`tesseract_status` 供设置页自检）、HTTP sidecar 实现（PaddleOCR 契约）、`VisionOcrProvider`（vision 能力 AIProvider 的高级 fallback，输出复用 `OcrResult`） | ✅ Phase 5/6 |
 | `lingua-database` | SQLite（rusqlite bundled）、migration runner、settings KV、providers / dictionaries / vocabulary / translation_history 表 DAO | ✅ Phase 0/1/3/4/8 |
 | `lingua-secrets` | `SecretStore` trait + keyring 实现（macOS Keychain / Windows Credential Manager / Linux Secret Service）；API Key 明文只存在这里 | ✅ Phase 1 |
 | `lingua` (src-tauri) | Tauri 壳：commands、全局快捷键、翻译 pipeline（经 Router）、Popup、Provider 管理/连接测试/应用设置命令 | ✅ Phase 1/2 |
@@ -43,8 +43,9 @@ OS / Network / SQLite / Models
 - 已落地：流式输出（SSE，`translate_stream` + `popup://delta` 事件）、
   `lingua-ocr`（Phase 5/6）、翻译历史（migration 0011 + 主窗口历史页）、
   学习分析（`AiTask::Study` + `StudyAnalyzer`）、生词本 Anki 导出、
-  Prompt 自定义。
-- **Phase 10**：Wayland 分治（GNOME/KDE）、多屏拼接截图、OCR 原位置
+  Prompt 自定义、多屏跨屏框选（每块屏一个 overlay，选区用虚拟桌面
+  逻辑坐标同步；见 §9.6）。
+- **Phase 10**：Wayland 分治（GNOME/KDE）、OCR 原位置
   覆盖翻译（bbox 数据已保留）。
 
 ### 为什么不现在建全部 crate
@@ -94,11 +95,12 @@ pipeline::run_translation_pipeline
 |------|-------|------|------|
 | 主窗口 | `main` | `tauri.conf.json` | ✅ Phase 0；关闭 = 隐藏到托盘（划词/截图继续可用），退出走托盘菜单 |
 | Popup | `popup` | `popup.html`（Vite 多入口） | ✅ 无边框、置顶（工具栏图钉可切换）、skip taskbar、失焦自动隐藏、光标所在显示器居中（边界钳制）；Esc 关闭 |
-| OCR 选区 | `ocr-selection` | Phase 5 | 计划：全屏透明 overlay，独立实现注意 Wayland 限制 |
+| OCR 选区 | `ocr-selection-{显示器下标}` | `ocr.html`（Vite 多入口） | ✅ 每块显示器一个不透明的快照 overlay（置顶、无边框、skip taskbar），选区跨窗口同步，可跨屏框选；Esc / 右键取消 |
 | Settings / Vocabulary | 复用 main 路由或独立窗口 | Phase 2/4 | 待定 |
 
-Capabilities（`src-tauri/capabilities/default.json`）当前只放行
-`main` / `popup` + `core:default`；新增窗口或插件权限时同步维护。
+Capabilities（`src-tauri/capabilities/default.json`）放行 `main` /
+`popup` 与 `ocr-selection-*`（每块显示器一个 OCR overlay，label 用
+glob 匹配）；新增窗口或插件权限时同步维护。
 
 Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会把
 真实焦点转给子窗口并触发主窗口 `Focused(false)`——「失焦隐藏」
@@ -120,6 +122,12 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
   前必须等快捷键的修饰键物理释放：SendInput 与物理按键状态是叠加
   关系，Alt 未松开时发出的是 Alt+Ctrl+C，应用不会复制
   （macOS CGEventPost 自带完整修饰键掩码，无此问题）。
+- **外部 CLI（tesseract）**：macOS 的 GUI 进程（Finder / Dock /
+  LaunchAgent 启动）拿到的是 launchd 的默认 PATH，不含 Homebrew 的
+  `/opt/homebrew/bin`——裸名只靠 PATH 会报「未安装」。统一经
+  `lingua_platform::resolve_executable` 定位：显式路径原样校验，裸名先查
+  PATH、再探工具专属目录与各平台常见安装目录；Windows 同理兜底
+  UB-Mannheim 安装器的默认目录。
 - **Wayland**：无可靠的全局选区坐标与全局快捷键方案，Popup 定位能力受限；
   Phase 10 按桌面环境（GNOME/KDE）逐个处理，X11 下能力完整。
 - **托盘/自启**：已完成 —— 托盘（tauri 内建 `tray-icon`）常驻，
@@ -206,29 +214,49 @@ Windows 焦点注记：WebView2 是独立的子 HWND 树，点击弹窗内容会
    `screencapture` CLI，屏幕录制权限 FFI 预检/请求，截图即读即删；
    Windows 走 GDI BitBlt——物理像素、无需权限，输出前强制
    不透明以免 PNG 在 webview 里透明渲染）；
-   **快照式选区 overlay**（`ocr.html` 入口）：start 时先截主显示器
-   整屏存入内存会话，overlay 显示这张冻结截图，用户在图上框选
-   （拖拽、Esc/右键取消、误点不退出）；裁剪缩放比按「截图像素 /
-   前端上报的 overlay CSS 视口」自校准（HiDPI / 显示器缩放下
-   不依赖 Rust 侧对 monitor 尺寸的推断），按比例换算像素坐标，
-   `crop_image`（image crate，PNG）在快照上裁剪后送 OCR。
+   **快照式选区 overlay**（`ocr.html` 入口）：start 时逐屏截图存入
+   内存会话，每块屏一个 overlay 显示各自的冻结截图，用户在图上框选
+   （拖拽、Esc/右键取消、误点不退出）；选区的 overlay CSS 坐标按
+   「显示器逻辑尺寸 / 前端上报的 overlay CSS 视口」换算成虚拟桌面逻辑
+   坐标（HiDPI / 显示器缩放下不依赖 Rust 侧对 monitor 尺寸的推断），
+   再按各屏快照自己的缩放比换算像素坐标，`DesktopCapture::crop`
+   （image crate，PNG）在快照上裁剪后送 OCR。
    不依赖窗口透明 / macOSPrivateApi，遮罩也不会被截进图。
    pipeline：裁剪 → OCR → 走现有 Router/Engine 翻译 → Popup。
 2. **未真机人工验证**（macOS 与 Windows 均需 `pnpm tauri dev` 走一遍）；
    macOS 需要授予「屏幕录制」权限（权限预检 + 系统授权框已接），
    Windows 无需权限。
 3. Tesseract 中文识别需额外语言包（`brew install tesseract-lang`），
-   且 Phase 5 未传 `-l` 语言参数（自动检测由翻译端处理）。
+   且 Phase 5 未传 `-l` 语言参数（自动检测由翻译端处理）。可执行文件
+   的定位见 §5「外部 CLI」；设置页「检测 tesseract」会显示实际使用的
+   路径、版本与已装语言包（缺 CJK 语言包时提示补装）。
 4. PaddleOCR 以 sidecar 形式接入（`scripts/paddleocr_server.py`，
    需自行安装 paddleocr/paddlepaddle；部署文档见 `docs/PADDLEOCR.md`）；
    ONNX 内嵌推理未做。
 5. 图片预处理（二值化/放大）为空操作；「OCR → 原位置覆盖翻译」
    依赖的 bbox 数据已保留，实现留到后续阶段。
-6. 多显示器：快照与 overlay 均跟随光标所在显示器（截图与选区坐标
-   同屏对齐，混合 DPI 也不串屏）；跨多屏拼接成一张大截图未做；
+6. 多显示器：`start_capture` 逐屏截图（每块屏一个阻塞任务，并行），
+   每块屏铺一个 overlay（`ocr-selection-{下标}`，窗口几何 = 该显示器），
+   焦点给光标所在屏（Esc 在那里生效）。选区用「虚拟桌面逻辑坐标」
+   （主屏左上角为原点，左侧 / 上方的屏为负）在所有 overlay 间经
+   `ocr://selection` 事件同步，别的窗口只画落在自己视口里的那一段，
+   于是可以跨屏起笔 / 松手。两种事件派发语义都覆盖：起笔的窗口一路
+   跟随拖拽（越出本屏时 clientX/Y 为负或超出视口，照样换算成全局
+   坐标）；鼠标按着移入别的 overlay 时该窗口接管拖拽。在屏幕间隙里
+   松开（没有窗口收到 mouseup）则取消这次拖拽。同步协议（`OcrApp.vue`，
+   纯坐标换算在 `src/ocr/selection.ts`）：起笔那一下不经节流、立即广播
+   ——别的屏必须在鼠标移过去之前知道拖拽已开始、锚点在哪；移动用
+   16ms 定时器合并（不用 requestAnimationFrame：窗口被系统节流时动画帧
+   可能一秒才跑一次）；广播带来源下标与指针事件时间戳，各窗口忽略
+   自己的回声，两块屏同时在跟拖拽时只有更新的远端状态才覆盖本地。跨屏选区由 `DesktopCapture::crop` 拼成
+   一张图（以重叠最多的屏的分辨率为准，混合 DPI 重采样，屏幕间隙
+   填黑）。macOS 截图按逻辑点下发（tauri 报的物理像素 ÷ scale）。
+   快捷键连按有进行中标记保护；重新触发时先撤下旧 overlay 再截图。
    OCR 历史随翻译历史统一记录（Phase 8，`entry_kind = "ocr"`）。
-   截图入口默认 `alt+s` 全局快捷键
-   （主窗口按钮入口的光标必然在主窗口所在屏，只能截那一块）。
+   已知限制：跨屏拖拽的真实事件派发尚未在真机逐平台验证（组件逻辑
+   已在真实浏览器内核的双窗口测试台里覆盖两种语义；坐标换算有单测）；显示器热插拔在下次截图时按新布局
+   重排；overlay 没有「应用失焦自动取消」，Cmd-Tab 切走后仍需
+   Esc / 右键关闭。
 
 ## 10. Phase 6：Vision AI（视觉大模型识别）
 

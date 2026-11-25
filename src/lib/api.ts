@@ -77,7 +77,7 @@ export interface AppSettingsDto {
   /** 自定义翻译 system prompt（流式路径）；"" = 用内置模板。 */
   promptTranslateStream: string;
   shortcut: string;
-  /** 截图翻译快捷键（默认 alt+s；多显示器下跟随光标所在屏）。 */
+  /** 截图翻译快捷键（默认 alt+s；冻结所有显示器，焦点在光标所在屏）。 */
   ocrShortcut: string;
   /** 界面主题：light | dark（主窗口与 Popup 共用）。 */
   uiTheme: string;
@@ -347,13 +347,77 @@ export async function startOcrCapture(): Promise<void> {
   await invoke("start_ocr_capture");
 }
 
-export async function getOcrBackground(): Promise<string | null> {
-  return invoke<string | null>("get_ocr_background");
+/**
+ * OCR 选区 overlay 的窗口归属：本窗口铺在哪块显示器上。坐标是「虚拟桌面
+ * 逻辑坐标」—— 主屏左上角为原点，排在左侧 / 上方的屏为负。
+ */
+export interface OcrSurface {
+  monitorIndex: number;
+  /** 该显示器在虚拟桌面逻辑坐标里的矩形；overlay 的 CSS 像素相对它定位。 */
+  rect: { x: number; y: number; width: number; height: number };
+  /** 该显示器的冻结截图（data URL）。 */
+  background: string;
 }
 
-/** OCR 会话更新通知（每次开始截图都会触发）。返回取消订阅函数。 */
+/**
+ * 进行中的选区（虚拟桌面逻辑坐标）。所有显示器的 overlay 共用同一份，
+ * 各自只画落在自己视口里的那一段 —— 拖拽因此可以跨屏。
+ */
+export interface OcrSelection {
+  /** 发出这份选区的 overlay 的显示器下标；各窗口据此忽略自己的回声。 */
+  source: number;
+  /**
+   * 产生这份选区的指针事件时间（`Date.now()`，各窗口同一面墙钟）。
+   * 两块屏同时在跟拖拽时，只有比本地指针事件更新的远端状态才覆盖本地。
+   */
+  at: number;
+  /** 起笔点（拖拽锚点）。 */
+  anchorX: number;
+  anchorY: number;
+  /** 左上角原点 + 正宽高。 */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 本窗口对应的显示器快照；没有活动截图会话（或本屏这次没截到）时为 null。 */
+export async function getOcrSurface(): Promise<OcrSurface | null> {
+  return invoke<OcrSurface | null>("get_ocr_surface");
+}
+
+/** 截图会话更新通知（每次开始截图都会触发）。返回取消订阅函数。 */
 export function onOcrBackgroundUpdated(handler: () => void): Promise<() => void> {
   return listen("ocr://background-updated", () => handler());
+}
+
+/** 把进行中的选区同步给其它显示器上的 overlay；null = 选区已结束（松手 / 取消）。 */
+export async function emitOcrSelection(selection: OcrSelection | null): Promise<void> {
+  await emit("ocr://selection", selection);
+}
+
+/** 订阅别的 overlay 上正在进行的拖拽。返回取消订阅函数。 */
+export function onOcrSelection(
+  handler: (selection: OcrSelection | null) => void,
+): Promise<() => void> {
+  return listen<OcrSelection | null>("ocr://selection", (event) => handler(event.payload));
+}
+
+/** tesseract 自检结果（设置页展示）。 */
+export interface TesseractStatus {
+  ok: boolean;
+  /** 实际使用的可执行文件（裸名经 PATH / 常见安装目录解析后的路径）。 */
+  path: string | null;
+  version: string | null;
+  /** 已安装的语言包。 */
+  languages: string[];
+  /** 自检失败原因；ok 为 true 时为 null。 */
+  error: string | null;
+}
+
+/** tesseract 自检：`path` 用表单里的当前值（未保存也可检测）。 */
+export async function ocrEngineStatus(path: string): Promise<TesseractStatus> {
+  return invoke<TesseractStatus>("ocr_engine_status", { path });
 }
 
 /** 打开文件选择框选一个词典文件（TSV / MDX）；取消返回 null。 */
@@ -423,6 +487,11 @@ export async function removeVocabularyWord(
   await invoke("remove_vocabulary_word", { word, language });
 }
 
+/**
+ * 提交框选。坐标是发起框选的那个 overlay 的 CSS 像素 —— 跨屏拖拽时可以越出
+ * 该屏（负坐标 / 超出视口），后端按该屏原点换算回虚拟桌面坐标再裁剪。
+ * viewport 是该 overlay 自身的 CSS 视口尺寸（HiDPI 自校准基准）。
+ */
 export async function performOcrTranslation(
   x: number,
   y: number,

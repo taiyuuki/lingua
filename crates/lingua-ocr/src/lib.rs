@@ -7,7 +7,9 @@
 //!
 //! * [`TesseractOcrProvider`] —— 调本机 `tesseract` CLI（`brew install
 //!   tesseract` / `winget install UB-Mannheim.TesseractOCR` 即可），
-//!   解析 TSV 输出（含词级 bbox / 置信度）；
+//!   解析 TSV 输出（含词级 bbox / 置信度）；可执行文件先查 PATH、再探常见
+//!   安装目录（GUI 进程的 PATH 里没有 Homebrew），[`tesseract_status`]
+//!   供设置页自检；
 //! * [`HttpOcrProvider`] —— 调本地 OCR HTTP 服务（附带的
 //!   `scripts/paddleocr_server.py` 用官方 paddleocr 包起一个 sidecar，
 //!   即「PaddleOCR 接入」的落地形式；自建服务照契约实现即可）；
@@ -24,5 +26,5 @@ pub mod vision;
 
 pub use http::HttpOcrProvider;
 pub use provider::{OCR_HTTP_DEFAULT_URL, OcrProvider};
-pub use tesseract::TesseractOcrProvider;
+pub use tesseract::{TesseractOcrProvider, TesseractStatus, tesseract_status};
 pub use vision::VisionOcrProvider;

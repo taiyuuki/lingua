@@ -81,7 +81,10 @@ impl TranslationEngine {
     /// 词典查询的公开入口（单词/词组命中返回结果，句子或未命中返回
     /// `None`）。管线用它实现「先词典、后 Keychain」的两阶段：词典
     /// 命中秒回，不被 API Key 的授权等待拖慢。
-    pub async fn lookup_dictionary(&self, request: &TranslationRequest) -> Option<TranslationResult> {
+    pub async fn lookup_dictionary(
+        &self,
+        request: &TranslationRequest,
+    ) -> Option<TranslationResult> {
         self.try_dictionary(request).await
     }
 

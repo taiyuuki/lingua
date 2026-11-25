@@ -82,9 +82,14 @@ impl Database {
                 .map_err(db_err)?;
             let mut written = 0usize;
             for record in &ordered {
-                written +=
-                    statement.execute(params![id, record.word_lower, record.accent, record.resource_path])
-                        .map_err(db_err)?;
+                written += statement
+                    .execute(params![
+                        id,
+                        record.word_lower,
+                        record.accent,
+                        record.resource_path
+                    ])
+                    .map_err(db_err)?;
             }
             written
         };
@@ -212,7 +217,12 @@ mod tests {
             record("hello", "us", "hello_2.spx"),
         ];
         let written = db
-            .replace_audio_library("al-lib", "英式美式发音库", r"C:\app\audiolibs\al-lib.mdd", &entries)
+            .replace_audio_library(
+                "al-lib",
+                "英式美式发音库",
+                r"C:\app\audiolibs\al-lib.mdd",
+                &entries,
+            )
             .unwrap();
         assert_eq!(written, 3);
 
@@ -266,7 +276,9 @@ mod tests {
 
         let hits = db.lookup_audio("cat").unwrap();
         assert_eq!(
-            hits.iter().map(|hit| hit.library_id.as_str()).collect::<Vec<_>>(),
+            hits.iter()
+                .map(|hit| hit.library_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["al-a", "al-b"]
         );
     }

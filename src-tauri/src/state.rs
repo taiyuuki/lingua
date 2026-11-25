@@ -1,11 +1,9 @@
 //! 全局应用状态。
 
-use lingua_core::translation::TranslationResult;
+use lingua_core::{OcrImage, translation::TranslationResult};
 use lingua_database::Database;
 use lingua_platform::SelectionService;
 use std::sync::Mutex;
-
-use lingua_core::OcrImage;
 
 /// Popup 当前展示内容；新建/重建的 popup 窗口挂载后会主动拉一次，
 /// 避免错过事件（事件 + 快照双通道）。
@@ -27,14 +25,15 @@ pub enum PopupState {
     },
 }
 
-/// 一次 OCR 截图会话：整屏快照（内存中，不落盘）+ monitor 逻辑尺寸。
-/// 裁剪缩放比的首选基准是前端上报的 overlay CSS 视口（HiDPI 自校准），
-/// monitor 逻辑尺寸只在前端上报缺失/非法时兜底。
+/// 一次 OCR 截图会话：**所有**显示器的快照（内存中，不落盘）。
+/// 每块屏铺一个 overlay 窗口（`ocr-selection-{下标}`），选区统一用虚拟桌面
+/// 逻辑坐标在窗口间同步，跨屏拖拽由此成立。
+/// 裁剪缩放比的首选基准是前端上报的 overlay CSS 视口（HiDPI 自校准）。
 pub struct OcrSession {
-    pub image: OcrImage,
-    pub background_data_url: String,
-    pub logical_width: f64,
-    pub logical_height: f64,
+    /// 各显示器快照；下标即 overlay 窗口序号。
+    pub desktop: lingua_platform::DesktopCapture,
+    /// 各显示器快照的 data URL（overlay 背景），与 `desktop.monitors` 同序。
+    pub backgrounds: Vec<String>,
 }
 
 /// 一次截图翻译的识别来源（Popup 展示用）：最终产出文本的引擎、
@@ -66,8 +65,12 @@ pub struct AppState {
     /// 发音库 .mdd 的随机读取句柄（id → 已解析句柄）。
     /// setup 阶段按库列表预载，导入/删除命令同步增删；资源协议
     /// 处理器只读缓存，不碰数据库。
-    pub audio_files:
-        Mutex<std::collections::HashMap<String, std::sync::Arc<lingua_dictionary::audio::MddResourceFile>>>,
+    pub audio_files: Mutex<
+        std::collections::HashMap<
+            String,
+            std::sync::Arc<lingua_dictionary::audio::MddResourceFile>,
+        >,
+    >,
 }
 
 impl AppState {

@@ -165,10 +165,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::delete_history,
             commands::clear_history,
             commands::start_ocr_capture,
-            commands::get_ocr_background,
+            commands::get_ocr_surface,
             commands::perform_ocr_translation,
             commands::cancel_ocr,
             commands::screen_recording_status,
+            commands::ocr_engine_status,
             commands::ocr_retry_available,
             commands::retry_ocr_with_vision,
             commands::ocr_source_info,
@@ -394,7 +395,7 @@ fn translate_shortcut_handler(app: &tauri::AppHandle, _shortcut: &Shortcut, even
     }
 }
 
-/// 截图快捷键：按下即截光标所在显示器并显示选区 overlay。
+/// 截图快捷键：按下即冻结所有显示器并显示选区 overlay（可跨屏框选）。
 fn ocr_shortcut_handler(app: &tauri::AppHandle, _shortcut: &Shortcut, event: ShortcutEvent) {
     if event.state == ShortcutState::Pressed {
         let app = app.clone();

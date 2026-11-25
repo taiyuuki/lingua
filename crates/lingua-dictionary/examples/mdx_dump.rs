@@ -19,7 +19,10 @@ fn main() {
         .cloned()
         .unwrap_or_else(|| "usage: mdx_dump [--raw|--extract] <file>".to_string());
     let file = std::path::PathBuf::from(&path);
-    if file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("mdd")) {
+    if file
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mdd"))
+    {
         match lingua_dictionary::mdx::list_mdd_resources(&file) {
             Ok(paths) => {
                 println!("mdd 资源 {} 个", paths.len());

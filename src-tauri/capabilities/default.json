@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Lingua 窗口的默认能力：main 与 popup",
-  "windows": ["main", "popup", "ocr-selection"],
+  "description": "Lingua 窗口的默认能力：main、popup 与每块显示器一个的 OCR 选区 overlay",
+  "windows": ["main", "popup", "ocr-selection-*"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
